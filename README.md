@@ -44,9 +44,10 @@ Alerts include the listing link; Telegram may show a photo via its link preview.
   restrict unauthorized automation. This source may change, stop working, or be blocked.
   There is no block-proof request rate. The official Pro API is for allowlisted sellers,
   not a general buyer search API: https://pro-docs.svc.vinted.com/.
-- One catalog page per selected brand (up to 10), filtered by colour, price, category and (for men) size,
-  plus up to six previously unchecked candidate detail pages, alternating between brands
-  per cycle. Requests are sequential and at least three seconds apart. Interval minimum: 10 seconds.
+- One combined catalog page per selected department, filtered by all selected brands (up to 10),
+  colour, price, category and (for men) size, plus up to six previously unchecked candidate detail
+  pages, alternating between brands per cycle. Requests are sequential and at least five seconds apart.
+  Interval minimum: 10 seconds locally and approximately five minutes through GitHub Actions.
   A scan may take longer than the selected interval and scans never overlap.
   There is no deep pagination: busy searches can miss items. Deferred detail checks are reported.
 - The first complete scan records a baseline without sending old listings to Telegram.

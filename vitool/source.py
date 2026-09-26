@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 import httpx
 from bs4 import BeautifulSoup
 
-from .settings import BRANDS
+from .settings import BRANDS, BRAND_ALIASES
 
 # Read from Vinted Germany's native filter controls on 2026-09-26.
 COLOR_IDS = {"black": 1, "brown": 2, "grey": 3, "beige": 4, "red": 7,
@@ -45,10 +45,11 @@ def retry_seconds(value):
 
 def search_url(settings, brand, department=None):
     department = department or settings.get("department") or settings["departments"][0]
+    brands = [brand] if isinstance(brand, str) else brand
     category = 79 if department == "men" else 10
     params = [("catalog[]", category), ("order", "newest_first"),
               ("price_to", settings["max_price"]), ("currency", "EUR")]
-    params.extend(("brand_ids[]", brand_id) for brand_id in BRANDS[brand])
+    params.extend(("brand_ids[]", brand_id) for name in brands for brand_id in BRANDS[name])
     params.extend(("color_ids[]", COLOR_IDS[color]) for color in settings["colors"])
     if department == "men":
         params.extend(("size_ids[]", MEN_SIZE_IDS[size]) for size in settings["sizes"])
@@ -101,10 +102,16 @@ class VintedSource:
             "User-Agent": "Vitool/0.1 personal listing watcher",
             "Accept-Language": "de-DE,de;q=0.9", "Accept": "text/html"})
         self.last_request = 0.0
+        self.catalog_cache = {}
+
+    def start_scan(self):
+        # One combined page can serve every selected brand in a department.
+        # Reset between scans so even short local intervals always fetch fresh data.
+        self.catalog_cache = {}
 
     def get(self, url):
-        # One request at a time, at least three seconds apart across the entire scan.
-        time.sleep(max(0, 3 - (time.monotonic() - self.last_request)))
+        # One request at a time, at least five seconds apart across the entire scan.
+        time.sleep(max(0, 5 - (time.monotonic() - self.last_request)))
         self.last_request = time.monotonic()
         try:
             response = self.client.get(url)
@@ -124,7 +131,12 @@ class VintedSource:
         return text
 
     def catalog(self, settings, brand):
-        return parse_catalog(self.get(search_url(settings, brand)))
+        url = search_url(settings, settings["brands"])
+        if url not in self.catalog_cache:
+            self.catalog_cache[url] = parse_catalog(self.get(url))
+        aliases = BRAND_ALIASES[brand]
+        return [item for item in self.catalog_cache[url]
+                if " ".join(item["brand"].split()).casefold() in aliases]
 
     def details(self, item):
         return parse_detail(self.get(item["url"]))

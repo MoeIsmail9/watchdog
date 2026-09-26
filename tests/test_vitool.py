@@ -135,6 +135,30 @@ def test_search_filters_match_native_vinted_controls():
     material_query = parse_qs(urlparse(search_url({**DEFAULTS, "materials": ["cotton", "cashmere"]}, "Gant")).query)
     assert material_query["material_ids[]"] == ["44", "123"]
     assert parse_qs(urlparse(search_url({**DEFAULTS, "brands": ["Nike"]}, "Nike")).query)["brand_ids[]"] == ["53"]
+    combined = parse_qs(urlparse(search_url(DEFAULTS, ["Ralph Lauren", "Gant"])).query)
+    assert combined["brand_ids[]"] == ["88", "4273", "6075"]
+
+
+def test_real_source_reuses_one_combined_catalog_request_for_all_brands():
+    html = '''
+      <a data-testid="product-item-id-1--overlay-link" href="/items/1-gant"
+         title="Pullover, Marke: Gant, Zustand: Sehr gut, Größe: M, 18.00 €, 20.00 €"></a>
+      <a data-testid="product-item-id-2--overlay-link" href="/items/2-ralph"
+         title="Pullover, Marke: Polo Ralph Lauren, Zustand: Sehr gut, Größe: M, 19.00 €, 21.00 €"></a>
+    '''
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, text=html)
+
+    source = VintedSource()
+    source.client = httpx.Client(transport=httpx.MockTransport(respond))
+    source.start_scan()
+    assert [row["id"] for row in source.catalog(DEFAULTS, "Gant")] == ["1"]
+    assert [row["id"] for row in source.catalog(DEFAULTS, "Ralph Lauren")] == ["2"]
+    assert len(requests) == 1
+    assert requests[0].url.params.get_list("brand_ids[]") == ["88", "4273", "6075"]
 
 
 def test_old_minute_interval_migrates_to_seconds():

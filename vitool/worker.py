@@ -44,6 +44,8 @@ class Worker:
             baseline = (not self.store.get("initialized", False)
                         or self.store.get("search_signature") != search_signature
                         or not self.store.get("brand_cursors", {}))
+            if hasattr(self.source, "start_scan"):
+                self.source.start_scan()
             pages = {}
             for department in settings["departments"]:
                 for brand in settings["brands"]:
