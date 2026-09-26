@@ -1,6 +1,9 @@
-name: Manual Vinted scan
+name: Scheduled Vinted scan
 
 on:
+  schedule:
+    # Fixed 15-minute slots, offset from the busiest quarter-hour boundaries.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 concurrency:

@@ -101,7 +101,7 @@ The included deployment separates the sleeping dashboard from scheduled scans:
 
 - Render serves the phone-friendly dashboard from `render.yaml`. Free services can sleep; opening
   the URL wakes the dashboard without interrupting scheduled scans.
-- GitHub Actions runs `.github/workflows/scan.yml` approximately every fifteen minutes.
+- GitHub Actions runs `.github/workflows/scheduled-scan.yml` approximately every fifteen minutes.
 - Turso stores settings, cursors, results and Telegram command offsets for both services.
 
 Create these GitHub repository settings under **Settings → Secrets and variables → Actions**:
