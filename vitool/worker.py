@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -29,7 +30,15 @@ class Worker:
         try:
             settings = self.store.settings()
             now = time.time()
-            if self.store.get("blocked", False) or now < self.store.get("next_scan", 0):
+            scheduled = os.getenv("VITOOL_SCHEDULED") == "1"
+            # GitHub jobs do not start at an exact second. A small grace period
+            # avoids turning a five-minute setting into ten minutes when the next
+            # job starts slightly earlier than the previous one. Retry cooldowns
+            # remain exact and are never bypassed by this grace period.
+            schedule_grace = min(90, settings["interval_seconds"]) if scheduled else 0
+            retry_until = self.store.get("retry_until", 0)
+            if (self.store.get("blocked", False) or now < retry_until
+                    or now < self.store.get("next_scan", 0) - schedule_grace):
                 return False
             if settings["paused"] and not force:
                 return False
@@ -111,9 +120,12 @@ class Worker:
             self.store.set("search_signature", search_signature)
             self.store.set("brand_cursors", next_cursors)
             self.store.set("failures", 0)
-            # Wait the configured interval after a completed scan. This prevents a
-            # long scan from immediately starting another cycle.
-            self.store.set("next_scan", time.time() + settings["interval_seconds"])
+            self.store.set("retry_until", 0)
+            # A continuously running local worker waits after completion. Scheduled
+            # cloud jobs keep the start-to-start timestamp written before I/O so a
+            # five-minute setting does not accidentally become ten minutes.
+            if not scheduled:
+                self.store.set("next_scan", time.time() + settings["interval_seconds"])
             if baseline:
                 message = "Current results saved as a baseline. Future new matches can alert you."
             else:
@@ -165,7 +177,9 @@ class Worker:
         failures = self.store.get("failures", 0) + 1
         self.store.set("failures", failures)
         delay = max(exc.delay, min(21600, 600 * 2 ** min(failures, 6)))
-        self.store.set("next_scan", time.time() + delay)
+        retry_until = time.time() + delay
+        self.store.set("next_scan", retry_until)
+        self.store.set("retry_until", retry_until)
         if exc.blocked:
             settings = self.store.settings()
             settings["paused"] = True

@@ -179,6 +179,24 @@ def test_success_clears_error_and_preserves_other_status_fields(store):
     assert store.get("next_scan") >= time.time() + DEFAULTS["interval_seconds"] - 2
 
 
+def test_scheduled_scan_uses_start_to_start_interval(store, monkeypatch):
+    import vitool.worker as worker_module
+
+    clock = {"now": 1000}
+
+    class SlowSource(Source):
+        def catalog(self, settings, brand):
+            clock["now"] = 1120
+            return super().catalog(settings, brand)
+
+    monkeypatch.setenv("VITOOL_SCHEDULED", "1")
+    monkeypatch.setattr(worker_module.time, "time", lambda: clock["now"])
+    worker = Worker(store, SlowSource([item()]), Bot())
+    assert worker.scan(force=True)
+    assert store.get("next_scan") == 1000 + DEFAULTS["interval_seconds"]
+    assert store.get("retry_until") == 0
+
+
 def test_detail_budget_alternates_brands(store):
     class ByBrand(Source):
         detail_brands = []

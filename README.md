@@ -112,8 +112,11 @@ Create these GitHub repository settings under **Settings → Secrets and variabl
 In Render, create a Blueprint from this repository and provide the same four values when prompted,
 plus a strong `VITOOL_DASHBOARD_PASSWORD`. The dashboard username is `watchdog`. Render automatically
 redeploys the dashboard after commits to the linked branch; scheduled Actions use the latest commit.
-Cloud scans have an effective minimum interval of about five minutes regardless of a lower setting.
-GitHub schedules can start late, so this free deployment does not provide exact timing guarantees.
+The dashboard saves the selected interval in Turso, and each GitHub Action reads it before scanning.
+Cloud scans run in five-minute slots: values below 300 seconds mean about five minutes, and other
+values round up to the next slot (for example, 420 seconds means about ten minutes). GitHub schedules
+can start late, so this free deployment does not provide exact timing guarantees. Local runs use the
+selected seconds directly after each completed scan.
 
 ## Development
 
