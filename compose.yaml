@@ -1,0 +1,16 @@
+services:
+  vitool:
+    build: .
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8765:8765"
+    env_file: .env
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - vitool-data:/data
+volumes:
+  vitool-data:
