@@ -33,11 +33,11 @@ class Worker:
             settings = self.store.settings()
             now = time.time()
             scheduled = os.getenv("VITOOL_SCHEDULED") == "1"
-            # GitHub jobs do not start at an exact second. A small grace period
-            # avoids turning a five-minute setting into ten minutes when the next
-            # job starts slightly earlier than the previous one. Retry cooldowns
-            # remain exact and are never bypassed by this grace period.
-            schedule_grace = min(90, settings["interval_seconds"]) if scheduled else 0
+            # Cloud jobs start every 15 minutes but GitHub queues them for a varying
+            # time. The grace period keeps a 15-minute setting from skipping a slot
+            # when one job starts later than the next. Retry cooldowns remain exact
+            # and are never bypassed by this grace period.
+            schedule_grace = min(300, settings["interval_seconds"]) if scheduled else 0
             retry_until = self.store.get("retry_until", 0)
             if (self.store.get("blocked", False) or now < retry_until
                     or now < self.store.get("next_scan", 0) - schedule_grace):
