@@ -85,7 +85,7 @@ def handler_for(store, worker):
                 settings = store.settings()
                 return self.response(200, {"settings": settings, "status": store.get("status", {}),
                     "next_scan": store.get("next_scan", 0), "blocked": store.get("blocked", False),
-                    "schedule": {"mode": "github", "minimum_seconds": 300}
+                    "schedule": {"mode": "github", "minimum_seconds": 900}
                                 if os.getenv("VITOOL_WEB_ONLY") == "1"
                                 else {"mode": "continuous", "minimum_seconds": 10},
                     "telegram_ready": worker.telegram.ready,

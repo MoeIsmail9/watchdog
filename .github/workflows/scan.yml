@@ -2,8 +2,8 @@ name: Scan Vinted
 
 on:
   schedule:
-    # Avoid the busiest :00/:05 boundaries while using an explicit POSIX minute list.
-    - cron: "4,9,14,19,24,29,34,39,44,49,54,59 * * * *"
+    # Fixed 15-minute slots, offset from the busiest quarter-hour boundaries.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 concurrency:

@@ -101,7 +101,7 @@ The included deployment separates the sleeping dashboard from scheduled scans:
 
 - Render serves the phone-friendly dashboard from `render.yaml`. Free services can sleep; opening
   the URL wakes the dashboard without interrupting scheduled scans.
-- GitHub Actions runs `.github/workflows/scan.yml` approximately every five minutes.
+- GitHub Actions runs `.github/workflows/scan.yml` approximately every fifteen minutes.
 - Turso stores settings, cursors, results and Telegram command offsets for both services.
 
 Create these GitHub repository settings under **Settings → Secrets and variables → Actions**:
@@ -113,8 +113,8 @@ In Render, create a Blueprint from this repository and provide the same four val
 plus a strong `VITOOL_DASHBOARD_PASSWORD`. The dashboard username is `watchdog`. Render automatically
 redeploys the dashboard after commits to the linked branch; scheduled Actions use the latest commit.
 The dashboard saves the selected interval in Turso, and each GitHub Action reads it before scanning.
-Cloud scans run in five-minute slots: values below 300 seconds mean about five minutes, and other
-values round up to the next slot (for example, 420 seconds means about ten minutes). GitHub schedules
+Cloud scans run in fifteen-minute slots: values below 900 seconds mean about fifteen minutes, and other
+values round up to the next slot (for example, 1200 seconds means about thirty minutes). GitHub schedules
 can start late, so this free deployment does not provide exact timing guarantees. Local runs use the
 selected seconds directly after each completed scan.
 
