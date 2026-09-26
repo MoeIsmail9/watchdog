@@ -18,6 +18,7 @@ jobs:
       TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       VITOOL_DATA_DIR: /tmp/vitool
       VITOOL_SCHEDULED: "1"
     steps:
@@ -25,4 +26,4 @@ jobs:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
-      - run: uv run --python 3.12 vitool --once
+      - run: uv run --python 3.12 vitool --once --force

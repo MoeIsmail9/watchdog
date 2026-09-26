@@ -142,7 +142,8 @@ def handler_for(store, worker):
 def main():
     parser = argparse.ArgumentParser(description="Vitool personal watchlist")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8765")))
-    parser.add_argument("--once", action="store_true", help="One scan; still respects cooldown and block state")
+    parser.add_argument("--once", action="store_true", help="One scan if not paused; respects cooldown and block state")
+    parser.add_argument("--force", action="store_true", help="With --once, scan even while paused")
     parser.add_argument("--telegram-chats", action="store_true", help="List chat IDs that have messaged your bot")
     args = parser.parse_args()
     load_env()
@@ -167,7 +168,7 @@ def main():
     worker = Worker(store)
     if args.once:
         worker.process_commands()
-        worker.scan(force=True)
+        worker.scan(force=args.force)
         print(json.dumps(store.get("status", {}), indent=2))
         return
     worker.status(scanning=False)

@@ -7,6 +7,7 @@ import time
 from itertools import zip_longest
 
 from .matching import STYLE_PATTERNS, basic_match, match_item
+from .review import Reviewer, ReviewError
 from .source import ItemSourceError, SourceError, VintedSource
 from .telegram import Telegram, TelegramError, handle_command
 
@@ -14,10 +15,11 @@ log = logging.getLogger(__name__)
 
 
 class Worker:
-    def __init__(self, store, source=None, telegram=None):
+    def __init__(self, store, source=None, telegram=None, reviewer=None):
         self.store = store
         self.source = source or VintedSource()
         self.telegram = telegram or Telegram()
+        self.reviewer = reviewer or Reviewer()
         self.lock = threading.Lock()
         self.stop = threading.Event()
 
@@ -150,11 +152,22 @@ class Worker:
             # Retry only recent matches that still appear in the current catalog and satisfy current settings.
             if self.telegram.ready:
                 pending = self.store.matches(pending=True)
+                reviews_left = 5 if self.reviewer.ready else 0
                 for item in pending:
                     if item["id"] not in items or time.time() - item["first_seen"] > 3600:
                         continue
                     if not match_item(item, settings)[0]:
                         continue
+                    if "review" not in item and reviews_left:
+                        reviews_left -= 1
+                        try:
+                            item["review"] = self.review(item, settings)
+                        except ReviewError as exc:
+                            # Never lose a find: alert unreviewed and stop reviewing this scan.
+                            reviews_left = 0
+                            self.status(review_error=str(exc))
+                        if item.get("review", {}).get("verdict") == "skip":
+                            continue
                     try:
                         self.telegram.alert(item)
                     except TelegramError as exc:
@@ -172,6 +185,18 @@ class Worker:
             return False
         finally:
             self.lock.release()
+
+    def review(self, item, settings):
+        review = self.reviewer.review(item, settings)
+        data = {k: v for k, v in item.items() if k not in ("first_seen", "reason", "delivered", "baseline")}
+        data["review"] = review
+        if review["verdict"] == "skip":
+            # Keep the listing so it is never reviewed or alerted again, but drop it from matches.
+            self.store.save_item(data, False, "AI skipped: " + review["summary"])
+        else:
+            self.store.save_item(data, True, item["reason"])
+        self.status(review_error=None)
+        return review
 
     def failure(self, exc):
         failures = self.store.get("failures", 0) + 1

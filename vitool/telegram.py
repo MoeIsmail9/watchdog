@@ -36,9 +36,21 @@ class Telegram:
         return self.call("sendMessage", {"chat_id": self.chat_id, "text": text[:4000]})
 
     def alert(self, item):
-        text = (f"{item['brand']} · €{item['price']:.2f}\n{item['title']}\n"
-                f"Size {item['size']} · {item['condition']}\n{item['reason']}\n"
-                f"Shipping and buyer fees extra.\n{item['url']}")
+        review = item.get("review")
+        if review:
+            price = f"€{item['price']:.2f}"
+            if review["new_price"] > item["price"]:
+                price += f" · new ~€{review['new_price']} (−{round(100 - 100 * item['price'] / review['new_price'])}%)"
+            lines = [f"✅ {review['score']}/10 — {item['brand']} · {item['title']}",
+                     f"Size {item['size']} · {item['condition']}", price,
+                     f"✔ {review['summary']}", *(f"⚠ {w}" for w in review["warnings"])]
+            if not review.get("photo"):
+                lines.append("⚠ Photo not checked")
+            text = "\n".join(lines) + f"\nShipping and buyer fees extra.\n{item['url']}"
+        else:
+            text = (f"{item['brand']} · €{item['price']:.2f}\n{item['title']}\n"
+                    f"Size {item['size']} · {item['condition']}\n{item['reason']}\n"
+                    f"Shipping and buyer fees extra.\n{item['url']}")
         # A link preview provides the product image when Telegram can fetch it.
         # One API call avoids duplicate alerts after an ambiguous photo timeout.
         self.send(text)

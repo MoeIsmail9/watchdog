@@ -11,8 +11,9 @@ from vitool.app import handler_for
 from vitool.matching import basic_match, match_item
 from vitool.settings import BRANDS, DEFAULTS, validate
 from vitool.source import ItemSourceError, SourceError, VintedSource, parse_catalog, parse_detail, search_url
+from vitool.review import Reviewer, ReviewError
 from vitool.store import Store
-from vitool.telegram import TelegramError, handle_command
+from vitool.telegram import Telegram, TelegramError, handle_command
 from vitool.worker import Worker
 
 
@@ -236,6 +237,86 @@ def test_baseline_duplicates_and_delivery_retry(store):
     scan_again(worker)
     assert [i["id"] for i in bot.alerts] == ["2"]
     assert store.item("2")["delivered"]
+
+
+class FakeReviewer:
+    ready = True
+
+    def __init__(self, verdicts=None, error=None):
+        self.verdicts = verdicts or {}
+        self.error = error
+        self.calls = []
+
+    def review(self, item, settings):
+        self.calls.append(item["id"])
+        if self.error:
+            raise self.error
+        return {"verdict": self.verdicts.get(item["id"], "send"), "score": 8, "new_price": 150,
+                "summary": "Brown merino half-zip", "warnings": ["Label not shown"], "photo": True}
+
+
+def test_ai_review_annotates_skips_and_caches(store):
+    source, bot, reviewer = Source([item()]), Bot(), FakeReviewer({"bad": "skip"})
+    worker = Worker(store, source, bot, reviewer)
+    scan_again(worker)
+    source.items[:0] = [item("good"), item("bad")]
+    scan_again(worker)
+    scan_again(worker)
+    assert [i["id"] for i in bot.alerts] == ["good"]
+    assert bot.alerts[0]["review"]["score"] == 8
+    assert sorted(reviewer.calls) == ["bad", "good"]
+    assert not store.item("bad")["matched"] and "AI skipped" in store.item("bad")["reason"]
+    assert [i["id"] for i in store.matches()] == ["good"]
+
+
+def test_ai_review_failure_still_alerts_and_retries_nothing_else(store):
+    source, bot = Source([item()]), Bot()
+    reviewer = FakeReviewer(error=ReviewError("Gemini returned HTTP 429"))
+    worker = Worker(store, source, bot, reviewer)
+    scan_again(worker)
+    source.items[:0] = [item("2"), item("3")]
+    scan_again(worker)
+    assert sorted(i["id"] for i in bot.alerts) == ["2", "3"]
+    assert len(reviewer.calls) == 1
+    assert "review" not in bot.alerts[0]
+    assert store.get("status")["review_error"] == "Gemini returned HTTP 429"
+
+
+def test_reviewer_is_off_without_key(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert not Reviewer().ready
+
+
+def test_reviewer_parses_gemini_answer(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test")
+    answer = {"verdict": "send", "score": 14, "new_price": 150, "summary": "ok", "warnings": ["a", "b", "c", "d"]}
+    sent = {}
+
+    def post(url, **kwargs):
+        sent.update(url=url, **kwargs)
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps(answer)}]}}]})
+
+    monkeypatch.setattr(httpx, "post", post)
+    result = Reviewer().review(item(), DEFAULTS)
+    assert result == {"verdict": "send", "score": 10, "new_price": 150, "summary": "ok",
+                      "warnings": ["a", "b", "c"], "photo": False}
+    assert sent["headers"]["x-goog-api-key"] == "test"
+    assert "Ralph Lauren" in sent["json"]["contents"][0]["parts"][0]["text"]
+    monkeypatch.setattr(httpx, "post", lambda url, **kwargs: httpx.Response(429))
+    with pytest.raises(ReviewError):
+        Reviewer().review(item(), DEFAULTS)
+
+
+def test_telegram_alert_shows_review(monkeypatch):
+    sent = []
+    telegram = Telegram()
+    monkeypatch.setattr(telegram, "send", sent.append)
+    telegram.alert({**item(), "price": 18, "reason": "brown",
+                    "review": {"score": 8, "new_price": 150, "summary": "Brown merino half-zip",
+                               "warnings": ["Label not shown"], "photo": True, "verdict": "send"}})
+    assert "✅ 8/10" in sent[0] and "new ~€150 (−88%)" in sent[0] and "⚠ Label not shown" in sent[0]
+    telegram.alert({**item(), "reason": "brown · Vinted colour filter"})
+    assert "brown · Vinted colour filter" in sent[1] and "/10" not in sent[1]
 
 
 def test_scan_status_explains_new_listing_that_did_not_match(store):

@@ -62,8 +62,13 @@ Alerts include the listing link; Telegram may show a photo via its link preview.
   Multiple selected necklines use “any of these” matching; no selection accepts any neckline.
   Some explicit damage phrases are excluded;
   this is not a complete defect detector or authenticity check.
-- AI is not connected in this version. The `matching.py` boundary is where an optional image/text
-  reviewer can be added later, after basic matching, with cached decisions and a spending cap.
+- Optional AI review: set `GEMINI_API_KEY` (free key from https://aistudio.google.com/apikey; in the
+  cloud add it as a GitHub Actions secret). Each new match is sent once to Gemini with its catalog photo,
+  text and your filters. Gemini returns a 1–10 score, a rough new price, a short summary and warnings,
+  which appear in the Telegram alert. Clear mismatches (wrong item, colour, kids size, damage, obvious
+  fake) are skipped and never alerted. At most five reviews run per scan; if Gemini fails or hits its
+  limit, the alert is sent unreviewed. Estimates are rough and not verified. On Gemini's free tier,
+  Google may use the submitted listing data to improve its products. `GEMINI_MODEL` overrides the model.
 - HTTP 401/403 or a recognized challenge pauses the watcher until you resume it. HTTP 429 respects
   Retry-After; transient errors trigger exponential cooldowns. Cooldowns survive restarts and manual checks.
   No proxies, login-cookie harvesting, fingerprint spoofing or CAPTCHA bypass are included.
@@ -102,12 +107,14 @@ The included deployment separates the sleeping dashboard from scheduled scans:
 - Render serves the phone-friendly dashboard from `render.yaml`. Free services can sleep; opening
   the URL wakes the dashboard without interrupting scheduled scans.
 - GitHub Actions runs `.github/workflows/scheduled-scan.yml` approximately every fifteen minutes.
+  These scans respect the pause switch (dashboard or `/pause`). The manual `scan.yml` workflow
+  always scans once, even while paused.
 - Turso stores settings, cursors, results and Telegram command offsets for both services.
 
 Create these GitHub repository settings under **Settings → Secrets and variables → Actions**:
 
 - Variable: `TURSO_DATABASE_URL`
-- Secrets: `TURSO_AUTH_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+- Secrets: `TURSO_AUTH_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, optional `GEMINI_API_KEY`
 
 In Render, create a Blueprint from this repository and provide the same four values when prompted,
 plus a strong `VITOOL_DASHBOARD_PASSWORD`. The dashboard username is `watchdog`. Render automatically
@@ -122,7 +129,8 @@ selected seconds directly after each completed scan.
 
 ```sh
 uv run pytest
-uv run vitool --once
+uv run vitool --once          # skipped while paused
+uv run vitool --once --force  # scans even while paused
 ```
 
 Tests use fake sources and Telegram clients; they do not hit Vinted or send real messages.
