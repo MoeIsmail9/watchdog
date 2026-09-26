@@ -2,8 +2,10 @@ import argparse
 import json
 import logging
 import os
+import secrets
 import threading
 import time
+from base64 import b64decode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -25,6 +27,9 @@ def load_env():
 
 
 def handler_for(store, worker):
+    public = os.getenv("VITOOL_PUBLIC") == "1"
+    dashboard_password = os.getenv("VITOOL_DASHBOARD_PASSWORD", "")
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
@@ -42,11 +47,37 @@ def handler_for(store, worker):
             self.wfile.write(body)
 
         def trusted_host(self):
-            return self.headers.get("Host", "") in {f"localhost:{self.server.server_port}", f"127.0.0.1:{self.server.server_port}"}
+            return public or self.headers.get("Host", "") in {
+                f"localhost:{self.server.server_port}", f"127.0.0.1:{self.server.server_port}"
+            }
+
+        def authorized(self):
+            if not dashboard_password:
+                return not public
+            try:
+                scheme, encoded = self.headers.get("Authorization", "").split(" ", 1)
+                username, password = b64decode(encoded).decode().split(":", 1)
+            except (ValueError, UnicodeDecodeError):
+                return False
+            return scheme.lower() == "basic" and secrets.compare_digest(username, "vitool") \
+                and secrets.compare_digest(password, dashboard_password)
+
+        def require_authorization(self):
+            body = json.dumps({"error": "Authentication required"}).encode()
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Vitool", charset="UTF-8"')
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def do_GET(self):
+            if self.path == "/health":
+                return self.response(200, {"ok": True})
             if not self.trusted_host():
                 return self.response(403, {"error": "Use localhost or an SSH tunnel"})
+            if not self.authorized():
+                return self.require_authorization()
             if self.path == "/":
                 return self.response(200, (Path(__file__).parent / "static/index.html").read_bytes(), "text/html; charset=utf-8")
             if self.path == "/api/state":
@@ -65,9 +96,12 @@ def handler_for(store, worker):
 
         def do_POST(self):
             if not self.trusted_host() or self.headers.get("X-Vitool") != "local":
-                return self.response(403, {"error": "Local requests only"})
+                return self.response(403, {"error": "Request rejected"})
+            if not self.authorized():
+                return self.require_authorization()
             origin = self.headers.get("Origin")
-            if origin and origin != "http://" + self.headers.get("Host", ""):
+            host = self.headers.get("Host", "")
+            if origin and origin not in {"http://" + host, "https://" + host}:
                 return self.response(403, {"error": "Invalid origin"})
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -103,11 +137,13 @@ def handler_for(store, worker):
 
 def main():
     parser = argparse.ArgumentParser(description="Vitool personal watchlist")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8765")))
     parser.add_argument("--once", action="store_true", help="One scan; still respects cooldown and block state")
     parser.add_argument("--telegram-chats", action="store_true", help="List chat IDs that have messaged your bot")
     args = parser.parse_args()
     load_env()
+    if os.getenv("VITOOL_PUBLIC") == "1" and not os.getenv("VITOOL_DASHBOARD_PASSWORD"):
+        parser.exit(1, "VITOOL_DASHBOARD_PASSWORD is required in public mode.\n")
     logging.basicConfig(level=logging.WARNING)
     # Prevent multiple workers sharing a data directory (also protects Telegram update offsets).
     store = Store(os.getenv("VITOOL_DATA_DIR", "data"))
@@ -126,13 +162,15 @@ def main():
         return
     worker = Worker(store)
     if args.once:
+        worker.process_commands()
         worker.scan(force=True)
         print(json.dumps(store.get("status", {}), indent=2))
         return
     worker.status(scanning=False)
     server = ThreadingHTTPServer(("0.0.0.0" if os.getenv("VITOOL_CONTAINER") == "1" else "127.0.0.1", args.port), handler_for(store, worker))
-    for target in (worker.run, worker.commands):
-        threading.Thread(target=target, daemon=True).start()
+    if os.getenv("VITOOL_WEB_ONLY") != "1":
+        for target in (worker.run, worker.commands):
+            threading.Thread(target=target, daemon=True).start()
     print(f"Vitool → http://localhost:{args.port}", flush=True)
     try:
         server.serve_forever()

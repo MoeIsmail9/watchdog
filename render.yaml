@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: watchdog
+    runtime: docker
+    plan: free
+    region: frankfurt
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: VITOOL_PUBLIC
+        value: "1"
+      - key: VITOOL_WEB_ONLY
+        value: "1"
+      - key: VITOOL_DATA_DIR
+        value: /tmp/vitool
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: VITOOL_DASHBOARD_PASSWORD
+        sync: false

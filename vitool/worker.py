@@ -183,23 +183,27 @@ class Worker:
 
     def commands(self):
         while not self.stop.is_set():
-            if self.telegram.ready:
-                try:
-                    updates = self.telegram.updates(self.store.get("telegram_offset", 0))
-                    for update in updates:
-                        message = update.get("message", {})
-                        # Persist consumption before executing commands to avoid repeats after a crash.
-                        self.store.set("telegram_offset", update["update_id"] + 1)
-                        if str(message.get("chat", {}).get("id")) != self.telegram.chat_id:
-                            continue
-                        if not message.get("text", "").startswith("/"):
-                            continue
-                        try:
-                            reply = handle_command(message["text"], self.store)
-                        except (ValueError, TypeError):
-                            reply = "Invalid value. Use /help for supported settings."
-                        self.telegram.send(reply)
-                    self.status(telegram_command_error=None)
-                except TelegramError as exc:
-                    self.status(telegram_command_error=str(exc))
+            self.process_commands()
             self.stop.wait(10)
+
+    def process_commands(self):
+        if not self.telegram.ready:
+            return
+        try:
+            updates = self.telegram.updates(self.store.get("telegram_offset", 0))
+            for update in updates:
+                message = update.get("message", {})
+                # Persist consumption before executing commands to avoid repeats after a crash.
+                self.store.set("telegram_offset", update["update_id"] + 1)
+                if str(message.get("chat", {}).get("id")) != self.telegram.chat_id:
+                    continue
+                if not message.get("text", "").startswith("/"):
+                    continue
+                try:
+                    reply = handle_command(message["text"], self.store)
+                except (ValueError, TypeError):
+                    reply = "Invalid value. Use /help for supported settings."
+                self.telegram.send(reply)
+            self.status(telegram_command_error=None)
+        except TelegramError as exc:
+            self.status(telegram_command_error=str(exc))

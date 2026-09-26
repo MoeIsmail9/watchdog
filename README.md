@@ -94,6 +94,26 @@ live in a persistent Docker volume. To carry local history over, stop both insta
 SQLite file into that volume with ownership `10001:10001` before starting the VPS instance.
 Hosting and any future AI service can have separate costs. A VPS does not solve Vinted blocking.
 
+## Free cloud deployment
+
+The included deployment separates the sleeping dashboard from scheduled scans:
+
+- Render serves the phone-friendly dashboard from `render.yaml`. Free services can sleep; opening
+  the URL wakes the dashboard without interrupting scheduled scans.
+- GitHub Actions runs `.github/workflows/scan.yml` approximately every five minutes.
+- Turso stores settings, cursors, results and Telegram command offsets for both services.
+
+Create these GitHub repository settings under **Settings → Secrets and variables → Actions**:
+
+- Variable: `TURSO_DATABASE_URL`
+- Secrets: `TURSO_AUTH_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+
+In Render, create a Blueprint from this repository and provide the same four values when prompted,
+plus a strong `VITOOL_DASHBOARD_PASSWORD`. The dashboard username is `vitool`. Render automatically
+redeploys the dashboard after commits to the linked branch; scheduled Actions use the latest commit.
+Cloud scans have an effective minimum interval of about five minutes regardless of a lower setting.
+GitHub schedules can start late, so this free deployment does not provide exact timing guarantees.
+
 ## Development
 
 ```sh

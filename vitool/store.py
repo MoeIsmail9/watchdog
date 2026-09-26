@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -12,6 +13,10 @@ class Store:
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = self.directory / "vitool.sqlite3"
+        self.database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+        self.auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+        if bool(self.database_url) != bool(self.auth_token):
+            raise ValueError("Set both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN")
         with self.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -21,12 +26,16 @@ class Store:
                     delivered INTEGER NOT NULL DEFAULT 0, baseline INTEGER NOT NULL DEFAULT 0
                 );
             """)
-        self.path.chmod(0o600)
+        if not self.database_url:
+            self.path.chmod(0o600)
 
     @contextmanager
     def connect(self):
-        db = sqlite3.connect(self.path, timeout=10)
-        db.row_factory = sqlite3.Row
+        if self.database_url:
+            import libsql
+            db = libsql.connect(self.database_url, auth_token=self.auth_token)
+        else:
+            db = sqlite3.connect(self.path, timeout=10)
         try:
             with db:
                 yield db
@@ -61,7 +70,8 @@ class Store:
     def item(self, item_id):
         with self.connect() as db:
             row = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
-        return dict(row) if row else None
+        columns = ("id", "data", "first_seen", "matched", "reason", "delivered", "baseline")
+        return dict(zip(columns, row)) if row else None
 
     def save_item(self, item, matched, reason, baseline=False):
         with self.connect() as db:
@@ -80,4 +90,6 @@ class Store:
         query += " ORDER BY first_seen DESC LIMIT 100"
         with self.connect() as db:
             rows = db.execute(query).fetchall()
-        return [{**json.loads(row["data"]), **{k: row[k] for k in ["first_seen", "reason", "delivered", "baseline"]}} for row in rows]
+        columns = ("id", "data", "first_seen", "matched", "reason", "delivered", "baseline")
+        records = [dict(zip(columns, row)) for row in rows]
+        return [{**json.loads(row["data"]), **{k: row[k] for k in ["first_seen", "reason", "delivered", "baseline"]}} for row in records]

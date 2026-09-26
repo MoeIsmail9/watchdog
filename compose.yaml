@@ -1,5 +1,6 @@
 services:
   vitool:
+    platform: linux/amd64
     build: .
     init: true
     restart: unless-stopped

@@ -3,7 +3,11 @@ name = "vitool"
 version = "0.1.0"
 description = "A small personal Vinted Germany watchlist"
 requires-python = ">=3.12"
-dependencies = ["beautifulsoup4>=4.13,<5", "httpx>=0.28,<1"]
+dependencies = [
+    "beautifulsoup4>=4.13,<5",
+    "httpx>=0.28,<1",
+    "libsql>=0.1.11,<0.2",
+]
 
 [dependency-groups]
 dev = ["pytest>=8,<10"]

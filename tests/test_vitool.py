@@ -387,3 +387,27 @@ def test_local_http_settings_and_csrf(store):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_public_dashboard_requires_password_and_keeps_health_public(store, monkeypatch):
+    monkeypatch.setenv("VITOOL_PUBLIC", "1")
+    monkeypatch.setenv("VITOOL_DASHBOARD_PASSWORD", "strong-test-password")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_for(store, Worker(store, Source(), Bot())))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with httpx.Client(base_url=url) as client:
+            assert client.get("/health").status_code == 200
+            assert client.get("/").status_code == 401
+            assert client.get("/", auth=("wrong", "strong-test-password")).status_code == 401
+            assert client.get("/", auth=("vitool", "strong-test-password")).status_code == 200
+            response = client.post(
+                "/api/settings", json={**DEFAULTS, "max_price": 16},
+                headers={"X-Vitool": "local"}, auth=("vitool", "strong-test-password"),
+            )
+            assert response.status_code == 200
+            assert store.settings()["max_price"] == 16
+    finally:
+        server.shutdown()
+        server.server_close()
