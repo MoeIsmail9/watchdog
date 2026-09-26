@@ -110,7 +110,7 @@ Create these GitHub repository settings under **Settings → Secrets and variabl
 - Secrets: `TURSO_AUTH_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 
 In Render, create a Blueprint from this repository and provide the same four values when prompted,
-plus a strong `VITOOL_DASHBOARD_PASSWORD`. The dashboard username is `vitool`. Render automatically
+plus a strong `VITOOL_DASHBOARD_PASSWORD`. The dashboard username is `watchdog`. Render automatically
 redeploys the dashboard after commits to the linked branch; scheduled Actions use the latest commit.
 Cloud scans have an effective minimum interval of about five minutes regardless of a lower setting.
 GitHub schedules can start late, so this free deployment does not provide exact timing guarantees.

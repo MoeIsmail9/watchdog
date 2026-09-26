@@ -28,6 +28,7 @@ def load_env():
 
 def handler_for(store, worker):
     public = os.getenv("VITOOL_PUBLIC") == "1"
+    dashboard_username = os.getenv("VITOOL_DASHBOARD_USERNAME", "watchdog")
     dashboard_password = os.getenv("VITOOL_DASHBOARD_PASSWORD", "")
 
     class Handler(BaseHTTPRequestHandler):
@@ -59,7 +60,7 @@ def handler_for(store, worker):
                 username, password = b64decode(encoded).decode().split(":", 1)
             except (ValueError, UnicodeDecodeError):
                 return False
-            return scheme.lower() == "basic" and secrets.compare_digest(username, "vitool") \
+            return scheme.lower() == "basic" and secrets.compare_digest(username, dashboard_username) \
                 and secrets.compare_digest(password, dashboard_password)
 
         def require_authorization(self):

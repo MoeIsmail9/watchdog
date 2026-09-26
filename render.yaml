@@ -11,6 +11,8 @@ services:
         value: "1"
       - key: VITOOL_WEB_ONLY
         value: "1"
+      - key: VITOOL_DASHBOARD_USERNAME
+        value: watchdog
       - key: VITOOL_DATA_DIR
         value: /tmp/vitool
       - key: TURSO_DATABASE_URL

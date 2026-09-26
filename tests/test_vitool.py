@@ -425,10 +425,10 @@ def test_public_dashboard_requires_password_and_keeps_health_public(store, monke
             assert client.get("/health").status_code == 200
             assert client.get("/").status_code == 401
             assert client.get("/", auth=("wrong", "strong-test-password")).status_code == 401
-            assert client.get("/", auth=("vitool", "strong-test-password")).status_code == 200
+            assert client.get("/", auth=("watchdog", "strong-test-password")).status_code == 200
             response = client.post(
                 "/api/settings", json={**DEFAULTS, "max_price": 16},
-                headers={"X-Vitool": "local"}, auth=("vitool", "strong-test-password"),
+                headers={"X-Vitool": "local"}, auth=("watchdog", "strong-test-password"),
             )
             assert response.status_code == 200
             assert store.settings()["max_price"] == 16
