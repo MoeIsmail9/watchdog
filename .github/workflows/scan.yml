@@ -2,8 +2,7 @@ name: Scan Vinted
 
 on:
   schedule:
-    # Offset from the common :00/:05 boundaries where GitHub reports the most scheduler load.
-    - cron: "4-59/5 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 concurrency:
