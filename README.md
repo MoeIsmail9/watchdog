@@ -53,9 +53,11 @@ Alerts include the listing link; Telegram may show a photo via its link preview.
 - The first complete scan records a baseline without sending old listings to Telegram.
   Each brand scan is sorted `newest_first` and remembers the newest item as its cursor. The next scan
   processes only unseen item IDs above that cursor. This tracks uploads since the previous successful
-  check; Vinted's public pages do not expose an exact upload timestamp. The first successful scan after
-  changing search filters creates a fresh baseline, so existing items from a newly selected brand do
-  not alert. Changing filters does not resend previously delivered or baseline items.
+  check; Vinted's public pages do not expose an exact upload timestamp. After a filter change (or for a
+  newly selected brand) there is no matching cursor, so only listings with an item ID above the highest
+  ID seen by the previous scan count as new; Vinted IDs increase over time. Older listings in the new
+  results never alert, and nothing is lost between the last scan and the change. Changing filters does
+  not resend previously delivered or baseline items.
   The dashboard keeps saved finds, which may have sold.
 - Colours come from seller-entered detail attributes. Size and condition are also seller-stated.
   Neckline matching uses multilingual text; unmentioned styles cannot be identified reliably.

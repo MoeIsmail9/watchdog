@@ -385,17 +385,28 @@ def test_detail_budget_only_applies_to_new_items(store):
     assert store.get("status")["existing_skipped"] == 10
 
 
-def test_filter_change_baselines_current_items_then_alerts_only_new_ids(store):
-    source, bot = Source([item("old")]), Bot()
+def test_filter_change_alerts_only_uploads_newer_than_previous_scan(store):
+    source, bot = Source([item("100")]), Bot()
     worker = Worker(store, source, bot)
     scan_again(worker)
     store.save_settings({**DEFAULTS, "brands": ["Nike"]})
-    source.items = [item("nike-current", brand="Nike")]
+    # 105 was uploaded after the last scan; 90 is an old listing in the new results.
+    source.items = [item("105", brand="Nike"), item("90", brand="Nike")]
     scan_again(worker)
-    assert not bot.alerts
-    source.items.insert(0, item("nike-new", brand="Nike"))
+    assert [found["id"] for found in bot.alerts] == ["105"]
+    source.items.insert(0, item("110", brand="Nike"))
     scan_again(worker)
-    assert [found["id"] for found in bot.alerts] == ["nike-new"]
+    assert [found["id"] for found in bot.alerts] == ["105", "110"]
+    assert store.get("watermark") == 110
+
+
+def test_watermark_starts_from_existing_cursors(store):
+    store.set("initialized", True)
+    store.set("brand_cursors", {"men:Ralph Lauren": "100"})
+    store.set("search_signature", "old filters")
+    source, bot = Source([item("101"), item("99")]), Bot()
+    scan_again(Worker(store, source, bot))
+    assert [found["id"] for found in bot.alerts] == ["101"]
 
 
 def test_worker_scans_every_selected_department_and_brand(store):

@@ -14,6 +14,10 @@ from .telegram import Telegram, TelegramError, handle_command
 log = logging.getLogger(__name__)
 
 
+def item_number(item_id):
+    return int(item_id) if str(item_id).isdigit() else 0
+
+
 class Worker:
     def __init__(self, store, source=None, telegram=None, reviewer=None):
         self.store = store
@@ -52,9 +56,13 @@ class Worker:
                 "materials", "necklines", "departments",
             )}
             search_signature = json.dumps(watched_settings, sort_keys=True)
-            baseline = (not self.store.get("initialized", False)
-                        or self.store.get("search_signature") != search_signature
-                        or not self.store.get("brand_cursors", {}))
+            previous_cursors = self.store.get("brand_cursors", {})
+            # Vinted item IDs increase over time. The highest ID seen by the previous
+            # scan separates new uploads from old listings, even after a filter change.
+            watermark = self.store.get("watermark") or max(
+                (item_number(c) for c in previous_cursors.values() if c), default=0)
+            filters_changed = self.store.get("search_signature") != search_signature
+            baseline = not self.store.get("initialized", False) or not (watermark or previous_cursors)
             if hasattr(self.source, "start_scan"):
                 self.source.start_scan()
             pages = {}
@@ -68,7 +76,6 @@ class Worker:
             # One Vinted item can appear in several brand pages. Its item ID is the
             # canonical identity, so merge duplicates before doing any other work.
             items = {i["id"]: i for pair in zip_longest(*pages.values()) for i in pair if i is not None}
-            previous_cursors = self.store.get("brand_cursors", {})
             next_cursors = {
                 brand: page[0]["id"] if page else previous_cursors.get(brand)
                 for brand, page in pages.items()
@@ -76,9 +83,11 @@ class Worker:
             candidate_pages = []
             if not baseline:
                 for brand, page in pages.items():
-                    cursor = previous_cursors.get(brand)
+                    cursor = None if filters_changed else previous_cursors.get(brand)
                     if not cursor:
-                        candidate_pages.append([])
+                        # A new search has no matching cursor: only uploads newer than
+                        # the previous scan count as new, so old results never flood alerts.
+                        candidate_pages.append([item for item in page if item_number(item["id"]) > watermark])
                         continue
                     newer = []
                     for item in page:
@@ -121,6 +130,7 @@ class Worker:
             self.store.set("initialized", True)
             self.store.set("search_signature", search_signature)
             self.store.set("brand_cursors", next_cursors)
+            self.store.set("watermark", max([watermark, *(item_number(i) for i in items)]))
             self.store.set("failures", 0)
             self.store.set("retry_until", 0)
             # A continuously running local worker waits after completion. Scheduled
