@@ -66,8 +66,9 @@ HELP = """Vitool settings
 /size M (or S,M)
 /colors brown,black
 /brands Ralph Lauren,Gant
+/categories pullovers,shirts,jackets
 /materials cotton,wool,cashmere (or /materials any)
-/necklines half_zip,v_neck (or any)
+/necklines half_zip,v_neck (or any; pullovers only)
 Change condition and departments through the local settings page.
 /interval 60 — seconds; minimum 10 seconds
 /pause /resume
@@ -93,8 +94,9 @@ def handle_command(text, store):
         settings["max_price"] = float(arg)
     elif command == "/interval":
         settings["interval_seconds"] = int(arg)
-    elif command in ("/size", "/colors", "/brands", "/materials"):
-        key = {"/size": "sizes", "/colors": "colors", "/brands": "brands", "/materials": "materials"}[command]
+    elif command in ("/size", "/colors", "/brands", "/materials", "/categories"):
+        key = {"/size": "sizes", "/colors": "colors", "/brands": "brands",
+               "/materials": "materials", "/categories": "categories"}[command]
         settings[key] = [x.strip() for x in arg.split(",")]
         if command == "/materials" and settings[key] == ["any"]:
             settings[key] = []

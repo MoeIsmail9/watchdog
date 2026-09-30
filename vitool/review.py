@@ -7,6 +7,7 @@ out. Any failure returns control to the caller, which still sends the alert.
 import base64
 import json
 import os
+import time
 
 import httpx
 
@@ -71,24 +72,33 @@ class Reviewer:
 
     def review(self, item, settings):
         wants = {key: settings[key] for key in (
-            "brands", "sizes", "colors", "max_price", "conditions", "materials", "necklines", "departments")}
+            "brands", "sizes", "colors", "max_price", "conditions", "materials", "necklines", "departments", "categories")}
         listing = {key: item.get(key, "") for key in (
-            "title", "brand", "size", "condition", "price", "color_text", "description", "department")}
+            "title", "brand", "size", "condition", "price", "color_text", "description", "department", "category")}
         parts = [{"text": PROMPT.format(wants=json.dumps(wants, ensure_ascii=False),
                                         listing=json.dumps(listing, ensure_ascii=False))}]
         image = self.image_part(item.get("image", ""))
         if image:
             parts.append(image)
-        try:
-            response = httpx.post(API_URL.format(model=self.model), timeout=40,
-                headers={"x-goog-api-key": self.api_key},
-                json={"contents": [{"parts": parts}],
-                      "generationConfig": {"responseMimeType": "application/json",
-                                           "responseSchema": SCHEMA, "temperature": 0.2}})
-        except httpx.HTTPError:
-            raise ReviewError("Gemini connection failed") from None
+        response = None
+        for attempt in range(3):
+            try:
+                response = httpx.post(API_URL.format(model=self.model), timeout=15,
+                    headers={"x-goog-api-key": self.api_key},
+                    json={"contents": [{"parts": parts}],
+                          "generationConfig": {"responseMimeType": "application/json",
+                                               "responseSchema": SCHEMA, "temperature": 0.2}})
+            except httpx.HTTPError:
+                if attempt == 2:
+                    raise ReviewError("Gemini connection failed after retries") from None
+            else:
+                if response.status_code not in (408, 429, 500, 502, 503, 504) or attempt == 2:
+                    break
+            time.sleep(2 ** attempt)
         if response.status_code != 200:
-            raise ReviewError(f"Gemini returned HTTP {response.status_code}")
+            raise ReviewError(f"Gemini returned HTTP {response.status_code} after retries"
+                              if response.status_code in (408, 429, 500, 502, 503, 504)
+                              else f"Gemini returned HTTP {response.status_code}")
         try:
             data = json.loads(response.json()["candidates"][0]["content"]["parts"][0]["text"])
             result = {

@@ -21,6 +21,12 @@ MATERIAL_IDS = {
     "corduroy": 299, "denim": 303, "leather": 43, "faux fur": 446,
     "suede": 298, "mesh": 456,
 }
+# Verified against Vinted Germany category pages on 2026-09-30. Women's
+# "shirts" uses Vinted's Blusen category.
+CATEGORY_IDS = {
+    "men": {"pullovers": 79, "shirts": 536, "jackets": 1206},
+    "women": {"pullovers": 13, "shirts": 1043, "jackets": 1037},
+}
 
 
 class SourceError(Exception):
@@ -43,11 +49,12 @@ def retry_seconds(value):
             return 0
 
 
-def search_url(settings, brand, department=None):
+def search_url(settings, brand, department=None, category=None):
     department = department or settings.get("department") or settings["departments"][0]
+    category_name = category or settings.get("category") or settings["categories"][0]
     brands = [brand] if isinstance(brand, str) else brand
-    category = 79 if department == "men" else 10
-    params = [("catalog[]", category), ("order", "newest_first"),
+    category_id = CATEGORY_IDS[department][category_name]
+    params = [("catalog[]", category_id), ("order", "newest_first"),
               ("price_to", settings["max_price"]), ("currency", "EUR")]
     params.extend(("brand_ids[]", brand_id) for name in brands for brand_id in BRANDS[name])
     params.extend(("color_ids[]", COLOR_IDS[color]) for color in settings["colors"])

@@ -93,9 +93,12 @@ def handler_for(store, worker):
                     "options": {"brands": sorted(BRANDS, key=str.casefold), "colors": list(COLORS),
                                 "conditions": sorted(CONDITIONS), "materials": sorted(MATERIALS),
                                 "departments": ["men", "women"],
+                                "categories": ["pullovers", "shirts", "jackets"],
                                 "necklines": ["half_zip", "v_neck", "crew_neck"]},
-                    "searches": [{"brand": b, "department": d, "url": search_url(settings, b, d)}
-                                 for d in settings["departments"] for b in settings["brands"]]})
+                    "searches": [{"brand": b, "department": d, "category": c,
+                                  "url": search_url(settings, b, d, c)}
+                                 for d in settings["departments"] for c in settings["categories"]
+                                 for b in settings["brands"]]})
             return self.response(404, {"error": "Not found"})
 
         def do_POST(self):

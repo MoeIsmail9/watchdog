@@ -53,7 +53,7 @@ class Worker:
             self.status(scanning=True, message="Reading newest listings…", last_attempt=now)
             watched_settings = {key: settings[key] for key in (
                 "brands", "sizes", "colors", "max_price", "conditions",
-                "materials", "necklines", "departments",
+                "materials", "necklines", "departments", "categories",
             )}
             search_signature = json.dumps(watched_settings, sort_keys=True)
             previous_cursors = self.store.get("brand_cursors", {})
@@ -67,15 +67,21 @@ class Worker:
                 self.source.start_scan()
             pages = {}
             for department in settings["departments"]:
-                for brand in settings["brands"]:
-                    key = f"{department}:{brand}"
-                    page_settings = {**settings, "department": department}
-                    pages[key] = self.source.catalog(page_settings, brand)
-                    for item in pages[key]:
-                        item["department"] = department
+                for category in settings["categories"]:
+                    for brand in settings["brands"]:
+                        key = f"{department}:{category}:{brand}"
+                        page_settings = {**settings, "department": department, "category": category}
+                        pages[key] = self.source.catalog(page_settings, brand)
+                        for item in pages[key]:
+                            item["department"] = department
+                            item["category"] = category
             # One Vinted item can appear in several brand pages. Its item ID is the
             # canonical identity, so merge duplicates before doing any other work.
-            items = {i["id"]: i for pair in zip_longest(*pages.values()) for i in pair if i is not None}
+            items = {}
+            for pair in zip_longest(*pages.values()):
+                for item in pair:
+                    if item is not None:
+                        items.setdefault(item["id"], item)
             next_cursors = {
                 brand: page[0]["id"] if page else previous_cursors.get(brand)
                 for brand, page in pages.items()
@@ -95,18 +101,20 @@ class Worker:
                             break
                         newer.append(item)
                     candidate_pages.append(newer)
-            candidates = {
-                item["id"]: item
-                for group in zip_longest(*candidate_pages)
-                for item in group if item is not None
-            } if candidate_pages else {}
+            candidates = {}
+            if candidate_pages:
+                for group in zip_longest(*candidate_pages):
+                    for item in group:
+                        if item is not None:
+                            candidates.setdefault(item["id"], item)
             # A seen ID may move above the cursor because of catalog reordering.
             # Never process or alert it twice.
             new_items = [item for item in candidates.values() if self.store.item(item["id"]) is None]
             existing_skipped = len(items) - len(new_items)
             pattern = "|".join(STYLE_PATTERNS[neckline] for neckline in settings["necklines"])
             ordered_items = sorted(new_items, key=lambda item: not bool(
-                pattern and re.search(pattern, item.get("title", "").lower())))
+                item["category"] == "pullovers" and pattern
+                and re.search(pattern, item.get("title", "").lower())))
             details_used, remaining, detail_errors, matches = 0, 0, 0, 0
             rejection_reasons = {}
             for item in ordered_items:

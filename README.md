@@ -2,7 +2,8 @@
 
 A personal Vinted Germany watchlist with a local settings page and Telegram alerts.
 Defaults: Ralph Lauren / Polo Ralph Lauren / Gant, M, brown or black, up to €20 before fees,
-very good or new. Men's pullovers are the initial department; choose men, women, or both in Settings.
+very good or new. Men's pullovers, shirts/Hemden, and jackets are selected initially; choose clothing
+types and men, women, or both departments in Settings.
 The brand selector contains Vinted Germany's 50 current popular pullover brands, combined into
 49 unique choices because Ralph Lauren and Polo Ralph Lauren share one watch option.
 
@@ -32,7 +33,8 @@ Only run one process per data directory; a process lock enforces this.
 
 The bot only processes commands from the configured chat. `/help` lists commands, including
 `/price 20`, `/size M`, `/colors brown,black`, `/brands Ralph Lauren,Gant`,
-`/materials cotton,wool,cashmere`, `/necklines half_zip,v_neck`, `/interval 60`, `/pause`,
+`/categories pullovers,shirts,jackets`, `/materials cotton,wool,cashmere`,
+`/necklines half_zip,v_neck`, `/interval 60`, `/pause`,
 `/resume`, `/settings`, and `/status`. `/interval` is measured in seconds.
 All settings can also be changed through the local page. Credentials load at startup.
 Alerts include the listing link; Telegram may show a photo via its link preview.
@@ -44,10 +46,11 @@ Alerts include the listing link; Telegram may show a photo via its link preview.
   restrict unauthorized automation. This source may change, stop working, or be blocked.
   There is no block-proof request rate. The official Pro API is for allowlisted sellers,
   not a general buyer search API: https://pro-docs.svc.vinted.com/.
-- One combined catalog page per selected department, filtered by all selected brands (up to 10),
-  colour, price, category and (for men) size, plus up to six previously unchecked candidate detail
+- One combined catalog page per selected clothing type and department, filtered by all selected
+  brands (up to 10), colour, price and (for men) size, plus up to six previously unchecked candidate detail
   pages, alternating between brands per cycle. Requests are sequential and at least five seconds apart.
-  Interval minimum: 10 seconds locally and approximately five minutes through GitHub Actions.
+  Shirts use Vinted's Hemden category for men and Blusen category for women.
+  Interval minimum: 10 seconds locally and approximately fifteen minutes in the cloud.
   A scan may take longer than the selected interval and scans never overlap.
   There is no deep pagination: busy searches can miss items. Deferred detail checks are reported.
 - The first complete scan records a baseline without sending old listings to Telegram.
@@ -60,7 +63,7 @@ Alerts include the listing link; Telegram may show a photo via its link preview.
   not resend previously delivered or baseline items.
   The dashboard keeps saved finds, which may have sold.
 - Colours come from seller-entered detail attributes. Size and condition are also seller-stated.
-  Neckline matching uses multilingual text; unmentioned styles cannot be identified reliably.
+  Neckline matching applies only to pullovers and uses multilingual text; unmentioned styles cannot be identified reliably.
   Multiple selected necklines use “any of these” matching; no selection accepts any neckline.
   Some explicit damage phrases are excluded;
   this is not a complete defect detector or authenticity check.
@@ -69,7 +72,8 @@ Alerts include the listing link; Telegram may show a photo via its link preview.
   text and your filters. Gemini returns a 1–10 score, a rough new price, a short summary and warnings,
   which appear in the Telegram alert. Clear mismatches (wrong item, colour, kids size, damage, obvious
   fake) are skipped and never alerted. At most five reviews run per scan; if Gemini fails or hits its
-  limit, the alert is sent unreviewed. Estimates are rough and not verified. On Gemini's free tier,
+  limit, the alert is sent unreviewed. Temporary HTTP 429/503 and connection failures get up to
+  three short attempts first. Estimates are rough and not verified. On Gemini's free tier,
   Google may use the submitted listing data to improve its products. `GEMINI_MODEL` overrides the model.
 - HTTP 401/403 or a recognized challenge pauses the watcher until you resume it. HTTP 429 respects
   Retry-After; transient errors trigger exponential cooldowns. Cooldowns survive restarts and manual checks.
@@ -108,8 +112,8 @@ The included deployment separates the sleeping dashboard from scheduled scans:
 
 - Render serves the phone-friendly dashboard from `render.yaml`. Free services can sleep; opening
   the URL wakes the dashboard without interrupting scheduled scans.
-- GitHub Actions runs `.github/workflows/scheduled-scan.yml` approximately every fifteen minutes.
-  These scans respect the pause switch (dashboard or `/pause`). The manual `scan.yml` workflow
+- GitHub Actions runs `.github/workflows/scheduled-scan.yml` when triggered by the configured
+  external 15-minute cron service. These scans respect the pause switch (dashboard or `/pause`). The manual `scan.yml` workflow
   always scans once, even while paused.
 - Turso stores settings, cursors, results and Telegram command offsets for both services.
 

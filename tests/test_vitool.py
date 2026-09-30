@@ -85,6 +85,11 @@ def test_matching_price_brand_size_color_and_style():
     assert match_item(item(department="women"), {**DEFAULTS, "departments": ["men", "women"]})[0]
     assert not match_item(item(department="women"), DEFAULTS)[0]
     assert match_item(item(brand="Nike"), {**DEFAULTS, "brands": ["Nike"]})[0]
+    multi = {**DEFAULTS, "categories": ["pullovers", "shirts", "jackets"],
+             "necklines": ["half_zip"]}
+    assert match_item(item(category="shirts", title="Brown Oxford shirt"), multi)[0]
+    assert match_item(item(category="jackets", title="Brown jacket"), multi)[0]
+    assert not match_item(item(category="shirts"), {**DEFAULTS, "categories": ["pullovers"]})[0]
 
 
 def test_catalogue_colour_filter_is_used_when_detail_colour_is_missing():
@@ -131,8 +136,14 @@ def test_search_filters_match_native_vinted_controls():
     assert query["order"] == ["newest_first"]
     assert "material_ids[]" not in query
     women_query = parse_qs(urlparse(search_url(DEFAULTS, "Ralph Lauren", "women")).query)
-    assert women_query["catalog[]"] == ["10"]
+    assert women_query["catalog[]"] == ["13"]
     assert "size_ids[]" not in women_query
+    for department, category, expected in [
+        ("men", "shirts", "536"), ("women", "shirts", "1043"),
+        ("men", "jackets", "1206"), ("women", "jackets", "1037"),
+    ]:
+        query = parse_qs(urlparse(search_url(DEFAULTS, "Gant", department, category)).query)
+        assert query["catalog[]"] == [expected]
     material_query = parse_qs(urlparse(search_url({**DEFAULTS, "materials": ["cotton", "cashmere"]}, "Gant")).query)
     assert material_query["material_ids[]"] == ["44", "123"]
     assert parse_qs(urlparse(search_url({**DEFAULTS, "brands": ["Nike"]}, "Nike")).query)["brand_ids[]"] == ["53"]
@@ -302,9 +313,25 @@ def test_reviewer_parses_gemini_answer(monkeypatch):
                       "warnings": ["a", "b", "c"], "photo": False}
     assert sent["headers"]["x-goog-api-key"] == "test"
     assert "Ralph Lauren" in sent["json"]["contents"][0]["parts"][0]["text"]
+    monkeypatch.setattr("vitool.review.time.sleep", lambda _: None)
     monkeypatch.setattr(httpx, "post", lambda url, **kwargs: httpx.Response(429))
     with pytest.raises(ReviewError):
         Reviewer().review(item(), DEFAULTS)
+
+
+def test_reviewer_retries_temporary_gemini_failure(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test")
+    monkeypatch.setattr("vitool.review.time.sleep", lambda _: None)
+    answer = {"verdict": "send", "score": 8, "new_price": 0, "summary": "ok", "warnings": []}
+    responses = iter([httpx.Response(503), httpx.Response(200, json={
+        "candidates": [{"content": {"parts": [{"text": json.dumps(answer)}]}}]})])
+    calls = []
+    def post(*args, **kwargs):
+        calls.append(1)
+        return next(responses)
+    monkeypatch.setattr(httpx, "post", post)
+    assert Reviewer().review(item(), DEFAULTS)["verdict"] == "send"
+    assert len(calls) == 2
 
 
 def test_telegram_alert_shows_review(monkeypatch):
@@ -425,8 +452,42 @@ def test_worker_scans_every_selected_department_and_brand(store):
         ("women", "Ralph Lauren"), ("women", "Gant"),
     }
     assert set(store.get("brand_cursors")) == {
-        "men:Ralph Lauren", "men:Gant", "women:Ralph Lauren", "women:Gant",
+        f"{department}:{category}:{brand}"
+        for department in ("men", "women")
+        for category in DEFAULTS["categories"]
+        for brand in DEFAULTS["brands"]
     }
+
+
+def test_new_clothing_types_scan_separately_without_resending_old_results(store):
+    class ByCategory(Source):
+        new_shirt = False
+
+        def catalog(self, settings, brand):
+            if brand != "Gant":
+                return []
+            category = settings["category"]
+            ids = {"pullovers": ["100"], "shirts": ["90"], "jackets": ["80"]}[category]
+            if category == "shirts" and self.new_shirt:
+                ids.insert(0, "101")
+            return [item(id, brand="Gant", title=f"Brown {category}") for id in ids]
+
+    source, bot = ByCategory(), Bot()
+    worker = Worker(store, source, bot)
+    store.save_settings({**DEFAULTS, "categories": ["pullovers"]})
+    scan_again(worker)
+    store.save_settings({**DEFAULTS, "categories": ["pullovers", "shirts", "jackets"]})
+    scan_again(worker)
+    assert not bot.alerts
+    assert set(store.get("brand_cursors")) == {
+        "men:pullovers:Ralph Lauren", "men:pullovers:Gant",
+        "men:shirts:Ralph Lauren", "men:shirts:Gant",
+        "men:jackets:Ralph Lauren", "men:jackets:Gant",
+    }
+    source.new_shirt = True
+    scan_again(worker)
+    assert [alert["id"] for alert in bot.alerts] == ["101"]
+    assert bot.alerts[0]["category"] == "shirts"
 
 
 def test_cursor_ignores_unseen_items_below_previous_newest(store):
@@ -485,6 +546,7 @@ def test_telegram_commands_persist_settings(store):
     handle_command("/colors black", store)
     handle_command("/necklines half_zip,v_neck", store)
     handle_command("/materials cotton,cashmere", store)
+    handle_command("/categories pullovers,shirts,jackets", store)
     store.set("next_scan", time.time() + 600)
     handle_command("/interval 30", store)
     settings = Store(store.directory).settings()
@@ -492,6 +554,7 @@ def test_telegram_commands_persist_settings(store):
     assert settings["colors"] == ["black"]
     assert settings["necklines"] == ["half_zip", "v_neck"]
     assert settings["materials"] == ["cotton", "cashmere"]
+    assert settings["categories"] == ["pullovers", "shirts", "jackets"]
     assert settings["interval_seconds"] == 30
     assert store.get("next_scan") <= time.time() + 31
     with pytest.raises(ValueError):

@@ -40,6 +40,7 @@ MATERIALS = {
 }
 DEFAULTS = {
     "brands": ["Ralph Lauren", "Gant"], "sizes": ["M"],
+    "categories": ["pullovers", "shirts", "jackets"],
     "colors": ["brown", "black"], "max_price": 20,
     "conditions": ["Sehr gut", "Neu", "Neu, ohne Etikett", "Neu, mit Etikett"],
     "materials": [], "necklines": [], "departments": ["men"],
@@ -66,7 +67,8 @@ def validate(value):
     result.update(value)
     for field, allowed in [("brands", BRANDS), ("colors", COLORS),
                            ("conditions", CONDITIONS), ("sizes", {"XS", "S", "M", "L", "XL", "XXL"}),
-                           ("departments", {"men", "women"})]:
+                           ("departments", {"men", "women"}),
+                           ("categories", {"pullovers", "shirts", "jackets"})]:
         items = result[field]
         if field == "brands" and isinstance(items, list):
             canonical = {" ".join(name.split()).casefold(): name for name in allowed}
