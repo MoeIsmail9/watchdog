@@ -295,7 +295,9 @@ def test_ai_review_failure_still_alerts_and_retries_nothing_else(store):
 
 def test_reviewer_is_off_without_key(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
     assert not Reviewer().ready
+    assert Reviewer().model == "gemini-3.5-flash-lite"
 
 
 def test_reviewer_parses_gemini_answer(monkeypatch):

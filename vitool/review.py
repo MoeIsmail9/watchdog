@@ -52,7 +52,7 @@ class ReviewError(Exception):
 class Reviewer:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        self.model = os.getenv("GEMINI_MODEL", "").strip() or "gemini-flash-latest"
+        self.model = os.getenv("GEMINI_MODEL", "").strip() or "gemini-3.5-flash-lite"
 
     @property
     def ready(self):

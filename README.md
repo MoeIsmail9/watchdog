@@ -74,7 +74,8 @@ Alerts include the listing link; Telegram may show a photo via its link preview.
   fake) are skipped and never alerted. At most five reviews run per scan; if Gemini fails or hits its
   limit, the alert is sent unreviewed. Temporary HTTP 429/503 and connection failures get up to
   three short attempts first. Estimates are rough and not verified. On Gemini's free tier,
-  Google may use the submitted listing data to improve its products. `GEMINI_MODEL` overrides the model.
+  Google may use the submitted listing data to improve its products. The default is the fixed
+  `gemini-3.5-flash-lite` model; `GEMINI_MODEL` overrides it.
 - HTTP 401/403 or a recognized challenge pauses the watcher until you resume it. HTTP 429 respects
   Retry-After; transient errors trigger exponential cooldowns. Cooldowns survive restarts and manual checks.
   No proxies, login-cookie harvesting, fingerprint spoofing or CAPTCHA bypass are included.
