@@ -85,6 +85,24 @@ Alerts include the listing link; Telegram may show a photo via its link preview.
 - A connected bot receives the first scan failure and access-block notifications. The dashboard
   always shows the last successful check. No connection means no phone alerts.
 
+## Kleinanzeigen searches
+
+Add up to five free-text searches under **Kleinanzeigen searches** in the dashboard: search text,
+optional PLZ or place with radius, optional max price. Each scan checks every search once, newest
+first, one request at a time (at least five seconds apart).
+
+- A new search first saves what is already listed. From then on, a listing alerts when its ad ID is
+  higher than the highest ID seen in the previous scan; Kleinanzeigen IDs increase over time, so paid
+  "TOP" ads and bumped old ads never alert. Listings above your max price are ignored ("VB" without a
+  number is kept).
+- With `GEMINI_API_KEY`, each new listing is checked against your search text and photo. Accessories
+  instead of the item, wanted ads ("Suche …"), defective/for-parts items and obvious scams are skipped;
+  the rest alert with a score, rough new price, summary and warnings. Failures still send the alert.
+- Kleinanzeigen errors use their own cooldown (six hours after a block) and never pause Vinted.
+  The pause switch stops both.
+- Public pages are an unofficial source, and Kleinanzeigen's terms restrict automated access. It can be
+  blocked at any time, cloud (GitHub Actions) addresses sooner than a home connection.
+
 ## VPS
 
 Use Docker Compose on a Linux VPS. No public web port is required:

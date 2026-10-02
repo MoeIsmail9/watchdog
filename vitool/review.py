@@ -45,6 +45,25 @@ Answer in English:
 - warnings: up to 3 short concerns, e.g. label not shown, possible pilling. Empty if none."""
 
 
+PROMPT_SEARCH = """You review a listing from Kleinanzeigen (German classifieds) for a buyer
+who saved a free-text search. Check the photo and the text, which may be German.
+
+Buyer wants: {wants}
+
+Listing:
+{listing}
+
+Answer in English:
+- verdict: "skip" only when the listing is clearly not what the buyer searched for: an
+  accessory, case or spare part instead of the item itself, a wanted ad ("Suche ..."),
+  a different product, defective or "for parts" unless the search asks for that, or an
+  obvious scam. Otherwise "send". When unsure, use "send" and add a warning.
+- score: 1-10, how good this find is for the buyer (fit with the search, condition, value).
+- new_price: rough retail price in EUR of this item bought new. 0 if you cannot tell.
+- summary: one short line (max 90 characters) of what it is and what you confirmed.
+- warnings: up to 3 short concerns, e.g. no photo of the item, price only "VB". Empty if none."""
+
+
 class ReviewError(Exception):
     pass
 
@@ -75,9 +94,20 @@ class Reviewer:
             "brands", "sizes", "colors", "max_price", "conditions", "materials", "necklines", "departments", "categories")}
         listing = {key: item.get(key, "") for key in (
             "title", "brand", "size", "condition", "price", "color_text", "description", "department", "category")}
-        parts = [{"text": PROMPT.format(wants=json.dumps(wants, ensure_ascii=False),
-                                        listing=json.dumps(listing, ensure_ascii=False))}]
-        image = self.image_part(item.get("image", ""))
+        return self.ask(PROMPT.format(wants=json.dumps(wants, ensure_ascii=False),
+                                      listing=json.dumps(listing, ensure_ascii=False)), item.get("image", ""))
+
+    def review_search(self, item, search):
+        """Review a Kleinanzeigen listing against a free-text saved search."""
+        wants = {"search": search["query"], "max_price": search.get("max_price"),
+                 "near": search.get("location_label") or "anywhere in Germany"}
+        listing = {key: item.get(key, "") for key in ("title", "price_text", "description", "location", "distance")}
+        return self.ask(PROMPT_SEARCH.format(wants=json.dumps(wants, ensure_ascii=False),
+                                             listing=json.dumps(listing, ensure_ascii=False)), item.get("image", ""))
+
+    def ask(self, prompt, image_url):
+        parts = [{"text": prompt}]
+        image = self.image_part(image_url)
         if image:
             parts.append(image)
         response = None

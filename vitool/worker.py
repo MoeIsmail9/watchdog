@@ -7,6 +7,7 @@ import time
 from itertools import zip_longest
 
 from .matching import STYLE_PATTERNS, basic_match, match_item
+from .kleinanzeigen import KleinanzeigenSource
 from .review import Reviewer, ReviewError
 from .source import ItemSourceError, SourceError, VintedSource
 from .telegram import Telegram, TelegramError, handle_command
@@ -19,9 +20,10 @@ def item_number(item_id):
 
 
 class Worker:
-    def __init__(self, store, source=None, telegram=None, reviewer=None):
+    def __init__(self, store, source=None, telegram=None, reviewer=None, ka_source=None):
         self.store = store
         self.source = source or VintedSource()
+        self.ka_source = ka_source or KleinanzeigenSource()
         self.telegram = telegram or Telegram()
         self.reviewer = reviewer or Reviewer()
         self.lock = threading.Lock()
@@ -170,29 +172,14 @@ class Worker:
             # Retry only recent matches that still appear in the current catalog and satisfy current settings.
             if self.telegram.ready:
                 pending = self.store.matches(pending=True)
-                reviews_left = 5 if self.reviewer.ready else 0
+                budget = {"reviews": 5 if self.reviewer.ready else 0}
                 for item in pending:
                     if item["id"] not in items or time.time() - item["first_seen"] > 3600:
                         continue
                     if not match_item(item, settings)[0]:
                         continue
-                    if "review" not in item and reviews_left:
-                        reviews_left -= 1
-                        try:
-                            item["review"] = self.review(item, settings)
-                        except ReviewError as exc:
-                            # Never lose a find: alert unreviewed and stop reviewing this scan.
-                            reviews_left = 0
-                            self.status(review_error=str(exc))
-                        if item.get("review", {}).get("verdict") == "skip":
-                            continue
-                    try:
-                        self.telegram.alert(item)
-                    except TelegramError as exc:
-                        self.status(telegram_error=str(exc))
+                    if not self.deliver(item, lambda i=item: self.reviewer.review(i, settings), budget):
                         break
-                    self.store.delivered(item["id"])
-                    self.status(telegram_error=None)
             return True
         except SourceError as exc:
             self.failure(exc)
@@ -204,8 +191,28 @@ class Worker:
         finally:
             self.lock.release()
 
-    def review(self, item, settings):
-        review = self.reviewer.review(item, settings)
+    def deliver(self, item, ask_review, budget):
+        """Review (while budget lasts) and alert one pending match. False stops further alerts."""
+        if "review" not in item and budget["reviews"]:
+            budget["reviews"] -= 1
+            try:
+                item["review"] = self.save_review(item, ask_review())
+            except ReviewError as exc:
+                # Never lose a find: alert unreviewed and stop reviewing this scan.
+                budget["reviews"] = 0
+                self.status(review_error=str(exc))
+            if item.get("review", {}).get("verdict") == "skip":
+                return True
+        try:
+            self.telegram.alert(item)
+        except TelegramError as exc:
+            self.status(telegram_error=str(exc))
+            return False
+        self.store.delivered(item["id"])
+        self.status(telegram_error=None)
+        return True
+
+    def save_review(self, item, review):
         data = {k: v for k, v in item.items() if k not in ("first_seen", "reason", "delivered", "baseline")}
         data["review"] = review
         if review["verdict"] == "skip":
@@ -215,6 +222,80 @@ class Worker:
             self.store.save_item(data, True, item["reason"])
         self.status(review_error=None)
         return review
+
+    def scan_kleinanzeigen(self, force=False):
+        """Check every saved Kleinanzeigen search once. Independent of Vinted's block state."""
+        searches = self.store.get("ka_searches", [])
+        if not searches or not self.lock.acquire(blocking=False):
+            return False
+        try:
+            settings = self.store.settings()
+            now = time.time()
+            scheduled = os.getenv("VITOOL_SCHEDULED") == "1"
+            grace = min(300, settings["interval_seconds"]) if scheduled else 0
+            if (settings["paused"] and not force) or now < self.store.get("ka_retry_until", 0) \
+                    or now < self.store.get("ka_next_scan", 0) - grace:
+                return False
+            self.store.set("ka_next_scan", now + settings["interval_seconds"])
+            watermarks = self.store.get("ka_watermarks", {})
+            current, new_count, baselines = set(), 0, 0
+            for search in searches:
+                results = self.ka_source.search(search)
+                mark = watermarks.get(search["id"])
+                top = max([mark or 0, *(item["ad_id"] for item in results)])
+                if mark is None:
+                    # First scan of a new search: remember where it stands, alert nothing old.
+                    watermarks[search["id"]] = top
+                    baselines += 1
+                    continue
+                for item in results:
+                    current.add(item["id"])
+                    # Paid TOP ads and bumped ads keep their old IDs, so they stay below the mark.
+                    if item["ad_id"] <= mark or self.store.item(item["id"]):
+                        continue
+                    if search["max_price"] is not None and (item["price"] or 0) > search["max_price"]:
+                        continue
+                    item.update(search_id=search["id"], query=search["query"])
+                    place = item["location"] + (f" ({item['distance']})" if item["distance"] else "")
+                    self.store.save_item(item, True, f"🔎 {search['query']}" + (f" · {place}" if place else ""))
+                    new_count += 1
+                watermarks[search["id"]] = top
+            self.store.set("ka_watermarks", watermarks)
+            self.store.set("ka_failures", 0)
+            message = f"Checked {len(searches)} Kleinanzeigen searches; {new_count} new listings."
+            if baselines:
+                message += f" {baselines} new searches saved their starting point."
+            self.store.set("ka_status", {"message": message, "error": False, "last_success": time.time()})
+            if self.telegram.ready:
+                by_id = {search["id"]: search for search in searches}
+                budget = {"reviews": 5 if self.reviewer.ready else 0}
+                for item in self.store.matches(pending=True):
+                    search = by_id.get(item.get("search_id"))
+                    if (item.get("source") != "kleinanzeigen" or not search or item["id"] not in current
+                            or time.time() - item["first_seen"] > 3600):
+                        continue
+                    if not self.deliver(item, lambda i=item, s=search: self.reviewer.review_search(i, s), budget):
+                        break
+            return True
+        except SourceError as exc:
+            failures = self.store.get("ka_failures", 0) + 1
+            self.store.set("ka_failures", failures)
+            delay = max(exc.delay, min(21600, 600 * 2 ** min(failures, 6)), 21600 if exc.blocked else 0)
+            self.store.set("ka_retry_until", time.time() + delay)
+            self.store.set("ka_status", {**self.store.get("ka_status", {}), "message": str(exc), "error": True})
+            if self.telegram.ready and failures == 1:
+                try:
+                    self.telegram.send("Vitool: " + str(exc) + " Vinted keeps running.")
+                except TelegramError:
+                    pass
+            return False
+        except Exception:
+            log.exception("Kleinanzeigen scan failed")
+            self.store.set("ka_status", {**self.store.get("ka_status", {}),
+                                         "message": "Unexpected Kleinanzeigen scan failure.", "error": True})
+            return False
+        finally:
+            self.lock.release()
 
     def failure(self, exc):
         failures = self.store.get("failures", 0) + 1
@@ -238,6 +319,7 @@ class Worker:
     def run(self):
         while not self.stop.is_set():
             self.scan()
+            self.scan_kleinanzeigen()
             self.stop.wait(5)
 
     def commands(self):

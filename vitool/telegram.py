@@ -8,6 +8,21 @@ class TelegramError(Exception):
     pass
 
 
+def ka_text(item, review):
+    price = item["price_text"] or "Price on request"
+    if review and review["new_price"] and item["price"] and review["new_price"] > item["price"]:
+        price += f" · new ~€{review['new_price']} (−{round(100 - 100 * item['price'] / review['new_price'])}%)"
+    place = item["location"] + (f" ({item['distance']})" if item["distance"] else "")
+    lines = [f"🔎 {item['query']}" + (f" — ✅ {review['score']}/10" if review else ""), item["title"], price]
+    if place:
+        lines.append("📍 " + place)
+    if review:
+        lines += [f"✔ {review['summary']}", *(f"⚠ {w}" for w in review["warnings"])]
+        if not review.get("photo"):
+            lines.append("⚠ Photo not checked")
+    return "\n".join(lines) + f"\nKleinanzeigen\n{item['url']}"
+
+
 class Telegram:
     def __init__(self):
         self.token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -37,6 +52,8 @@ class Telegram:
 
     def alert(self, item):
         review = item.get("review")
+        if item.get("source") == "kleinanzeigen":
+            return self.send(ka_text(item, review))
         if review:
             price = f"€{item['price']:.2f}"
             if review["new_price"] > item["price"]:

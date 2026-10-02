@@ -610,3 +610,180 @@ def test_public_dashboard_requires_password_and_keeps_health_public(store, monke
     finally:
         server.shutdown()
         server.server_close()
+
+
+# --- Kleinanzeigen -------------------------------------------------------
+
+from vitool import kleinanzeigen
+from vitool.telegram import ka_text
+
+KA_HTML = """<ul>
+<li><article data-adid="1457457547" data-href="/s-anzeige/top-gazelle/1457457547-217-1897">
+<script type="application/ld+json">{"title":"TOP Gazelle Hollandrad","description":"Alt","contentUrl":"https://img.kleinanzeigen.de/a.jpg"}</script>
+<div><span>40667 Meerbusch</span></div><h3><a>TOP Gazelle Hollandrad</a></h3><p>170 € VB</p></article></li>
+<li><article data-adid="3529076916" data-href="/s-anzeige/iphone-14-128gb-schwarz/3529076916-173-3376?x=1">
+<script type="application/ld+json">{"title":"iPhone 14 - 128GB - Schwarz","description":"Batterie 81%","contentUrl":"https://img.kleinanzeigen.de/b.jpg"}</script>
+<div><span>10963 Kreuzberg</span><span>(2 km)</span></div><div><span>Heute, 16:48</span></div>
+<h3><a>iPhone 14 - 128GB - Schwarz</a></h3><p>iPhone 14 - 128GB ...</p><p>1.200 € VB</p></article></li>
+<li><article data-adid="3529075629" data-href="/s-anzeige/karton/3529075629-406-9642">
+<h3><a>Umzugskartons</a></h3><p>Zu verschenken</p></article></li>
+</ul>"""
+
+
+def ka_item(ad_id, price=300.0, **kwargs):
+    return {"id": f"ka:{ad_id}", "ad_id": ad_id, "title": f"iPhone {ad_id}", "description": "",
+            "price": price, "price_text": f"{price:.0f} € VB" if price is not None else "VB", "location": "10963 Kreuzberg",
+            "distance": "2 km", "url": f"https://www.kleinanzeigen.de/s-anzeige/x/{ad_id}",
+            "image": "", "source": "kleinanzeigen", **kwargs}
+
+
+class KaSource:
+    def __init__(self, results=None, error=None):
+        self.results = results or []
+        self.error = error
+        self.calls = []
+
+    def search(self, search):
+        self.calls.append(search["query"])
+        if self.error:
+            raise self.error
+        return copy.deepcopy(self.results)
+
+
+def ka_search(id="s1", **kwargs):
+    return {"id": id, "query": "iphone", "plz": "10115", "location_id": "9668",
+            "location_label": "10115 Mitte", "radius": 20, "max_price": 400, **kwargs}
+
+
+def ka_worker(store, results, reviewer=None, bot=None):
+    store.save_settings({**DEFAULTS, "paused": False})
+    store.set("ka_searches", [ka_search()])
+    source = KaSource(results)
+    worker = Worker(store, Source(), bot or Bot(), reviewer, ka_source=source)
+    return worker, source
+
+
+def ka_scan_again(worker):
+    worker.store.set("ka_next_scan", 0)
+    return worker.scan_kleinanzeigen()
+
+
+def test_ka_parse_results_from_public_markup():
+    items = kleinanzeigen.parse_results(KA_HTML)
+    assert [i["id"] for i in items] == ["ka:1457457547", "ka:3529076916", "ka:3529075629"]
+    phone = items[1]
+    assert phone["title"] == "iPhone 14 - 128GB - Schwarz" and phone["price"] == 1200.0
+    assert phone["price_text"] == "1.200 € VB" and phone["location"] == "10963 Kreuzberg"
+    assert phone["distance"] == "2 km" and phone["image"] == "https://img.kleinanzeigen.de/b.jpg"
+    assert phone["url"] == "https://www.kleinanzeigen.de/s-anzeige/iphone-14-128gb-schwarz/3529076916-173-3376"
+    assert items[2]["price"] == 0.0 and items[2]["title"] == "Umzugskartons"
+    assert kleinanzeigen.parse_results("<p>Es wurden leider keine Ergebnisse gefunden.</p>") == []
+    with pytest.raises(SourceError):
+        kleinanzeigen.parse_results("<p>Something else</p>")
+    assert kleinanzeigen.parse_price("VB") is None
+
+
+def test_ka_search_url_and_validation():
+    assert kleinanzeigen.search_url(ka_search(query="iPhone 15")) == \
+        "https://www.kleinanzeigen.de/s-10115/preis::400/sortierung:neuste/iphone-15/k0l9668r20"
+    assert kleinanzeigen.search_url(ka_search(query="Kühlschrank", plz="", location_id="", radius=0, max_price=None)) == \
+        "https://www.kleinanzeigen.de/s-sortierung:neuste/k%C3%BChlschrank/k0"
+    clean = kleinanzeigen.validate_search({"query": "  iPhone   15 ", "plz": "", "radius": 50, "max_price": ""})
+    assert clean["query"] == "iPhone 15" and clean["radius"] == 0 and clean["max_price"] is None
+    for bad in [{"query": "x"}, {"query": "ok", "radius": 7}, {"query": "ok", "max_price": 0}, []]:
+        with pytest.raises(ValueError):
+            kleinanzeigen.validate_search(bad)
+
+
+def test_ka_lookup_location(monkeypatch):
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: httpx.Response(
+        200, json={"_0": "Deutschland", "_9668": "10115 Mitte", "_3504": "10115 Wedding"}))
+    assert kleinanzeigen.lookup_location("10115") == ("9668", "10115 Mitte")
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: httpx.Response(200, json={"_0": "Deutschland"}))
+    with pytest.raises(ValueError):
+        kleinanzeigen.lookup_location("nowhere")
+
+
+def test_ka_baseline_then_only_newer_listings_within_price(store):
+    worker, source = ka_worker(store, [ka_item(100), ka_item(50)])
+    assert ka_scan_again(worker)
+    assert not worker.telegram.alerts and store.get("ka_watermarks") == {"s1": 100}
+    # 60 is an old paid TOP ad, 120 is too expensive, 110 is new and fits.
+    source.results = [ka_item(60), ka_item(120, price=900), ka_item(110), ka_item(100)]
+    ka_scan_again(worker)
+    assert [i["id"] for i in worker.telegram.alerts] == ["ka:110"]
+    assert worker.telegram.alerts[0]["query"] == "iphone"
+    ka_scan_again(worker)
+    assert len(worker.telegram.alerts) == 1
+    assert store.get("ka_watermarks") == {"s1": 120}
+
+
+class KaReviewer(FakeReviewer):
+    def review_search(self, item, search):
+        return self.review(item, search)
+
+
+def test_ka_review_skip_and_failure(store):
+    worker, source = ka_worker(store, [ka_item(100)], KaReviewer({"ka:110": "skip"}))
+    ka_scan_again(worker)
+    source.results = [ka_item(111), ka_item(110), ka_item(100)]
+    ka_scan_again(worker)
+    assert [i["id"] for i in worker.telegram.alerts] == ["ka:111"]
+    assert worker.telegram.alerts[0]["review"]["score"] == 8
+    assert "AI skipped" in store.item("ka:110")["reason"]
+    worker.reviewer = KaReviewer(error=ReviewError("Gemini returned HTTP 503"))
+    source.results = [ka_item(112), *source.results]
+    ka_scan_again(worker)
+    assert worker.telegram.alerts[-1]["id"] == "ka:112" and "review" not in worker.telegram.alerts[-1]
+
+
+def test_ka_block_backs_off_without_blocking_vinted(store):
+    worker, source = ka_worker(store, [])
+    source.error = SourceError("Kleinanzeigen blocked access (HTTP 403).", blocked=True)
+    assert not ka_scan_again(worker)
+    assert not store.get("blocked", False) and not store.settings()["paused"]
+    assert store.get("ka_retry_until") > time.time() + 21000
+    assert store.get("ka_status")["error"] and "Vinted keeps running" in worker.telegram.messages[0]
+    assert not ka_scan_again(worker) and len(source.calls) == 1
+
+
+def test_ka_respects_pause_and_dashboard_ignores_vinted_matching(store):
+    worker, source = ka_worker(store, [ka_item(100)])
+    store.save_settings({**DEFAULTS, "paused": True})
+    assert not ka_scan_again(worker) and not source.calls
+    assert worker.scan_kleinanzeigen(force=True) is True
+
+
+def test_ka_telegram_text():
+    text = ka_text({**ka_item(5, price=300.0), "query": "iphone"},
+                   {"score": 8, "new_price": 800, "summary": "iPhone 14, 128 GB", "warnings": ["Battery 81%"],
+                    "photo": True, "verdict": "send"})
+    assert text.startswith("🔎 iphone — ✅ 8/10") and "300 € VB · new ~€800 (−62%)" in text
+    assert "📍 10963 Kreuzberg (2 km)" in text and "⚠ Battery 81%" in text
+    plain = ka_text({**ka_item(6, price=None, price_text="VB"), "query": "iphone"}, None)
+    assert "/10" not in plain and "\nVB\n" in plain
+
+
+def test_ka_dashboard_add_and_delete(store, monkeypatch):
+    monkeypatch.setattr(kleinanzeigen, "lookup_location", lambda place: ("9668", "10115 Mitte"))
+    worker = Worker(store, Source(), Bot(), ka_source=KaSource())
+    store.save_item({**ka_item(7), "query": "iphone", "search_id": "x"}, True, "🔎 iphone")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_for(store, worker))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    headers = {"X-Vitool": "local"}
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{server.server_port}") as client:
+            assert client.post("/api/ka-search", json={"query": "iphone"}).status_code == 403
+            response = client.post("/api/ka-search", headers=headers,
+                                   json={"query": "iPhone 15", "plz": "10115", "radius": 20, "max_price": 400})
+            assert response.status_code == 200
+            state = client.get("/api/state").json()
+            [search] = state["ka_searches"]
+            assert search["location_id"] == "9668" and search["url"].endswith("/iphone-15/k0l9668r20")
+            assert [m["id"] for m in state["matches"]] == ["ka:7"]
+            assert client.post("/api/ka-search", headers=headers, json={"query": "x"}).status_code == 400
+            client.post("/api/ka-search-delete", headers=headers, json={"id": search["id"]})
+            assert client.get("/api/state").json()["ka_searches"] == []
+    finally:
+        server.shutdown()
+        server.server_close()

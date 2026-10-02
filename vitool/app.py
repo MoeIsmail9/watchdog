@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .settings import BRANDS, COLORS, CONDITIONS, MATERIALS
 from .matching import match_item
+from . import kleinanzeigen
 from .source import search_url
 from .store import Store
 from .telegram import Telegram, TelegramError
@@ -43,7 +44,7 @@ def handler_for(store, worker):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.vinted.net; connect-src 'self'; frame-ancestors 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.vinted.net https://img.kleinanzeigen.de; connect-src 'self'; frame-ancestors 'none'")
             self.end_headers()
             self.wfile.write(body)
 
@@ -89,7 +90,11 @@ def handler_for(store, worker):
                                 if os.getenv("VITOOL_WEB_ONLY") == "1"
                                 else {"mode": "continuous", "minimum_seconds": 10},
                     "telegram_ready": worker.telegram.ready,
-                    "matches": [i for i in store.matches() if match_item(i, settings)[0]],
+                    "matches": [i for i in store.matches()
+                                if i.get("source") == "kleinanzeigen" or match_item(i, settings)[0]],
+                    "ka_searches": [{**search, "url": kleinanzeigen.search_url(search)}
+                                    for search in store.get("ka_searches", [])],
+                    "ka_status": store.get("ka_status", {}),
                     "options": {"brands": sorted(BRANDS, key=str.casefold), "colors": list(COLORS),
                                 "conditions": sorted(CONDITIONS), "materials": sorted(MATERIALS),
                                 "departments": ["men", "women"],
@@ -130,7 +135,21 @@ def handler_for(store, worker):
                 elif self.path == "/api/scan":
                     if time.time() < store.get("next_scan", 0) or worker.lock.locked() or store.get("blocked", False):
                         return self.response(409, {"error": "Scan is running, paused by a block, or in cooldown. Wait until the next check."})
-                    threading.Thread(target=worker.scan, kwargs={"force": True}, daemon=True).start()
+                    threading.Thread(target=lambda: (worker.scan(force=True), worker.scan_kleinanzeigen(force=True)),
+                                     daemon=True).start()
+                elif self.path == "/api/ka-search":
+                    searches = store.get("ka_searches", [])
+                    if len(searches) >= kleinanzeigen.MAX_SEARCHES:
+                        raise ValueError(f"Up to {kleinanzeigen.MAX_SEARCHES} Kleinanzeigen searches")
+                    search = kleinanzeigen.validate_search(data)
+                    if search["plz"]:
+                        search["location_id"], search["location_label"] = kleinanzeigen.lookup_location(search["plz"])
+                    store.set("ka_searches", [*searches, search])
+                elif self.path == "/api/ka-search-delete":
+                    store.set("ka_searches", [s for s in store.get("ka_searches", []) if s["id"] != data.get("id")])
+                    watermarks = store.get("ka_watermarks", {})
+                    watermarks.pop(data.get("id"), None)
+                    store.set("ka_watermarks", watermarks)
                 elif self.path == "/api/telegram-test":
                     worker.telegram.send("Vitool is connected. Use /settings to see your watchlist and /help to edit it.")
                 else:
@@ -172,7 +191,10 @@ def main():
     if args.once:
         worker.process_commands()
         worker.scan(force=args.force)
+        worker.scan_kleinanzeigen(force=args.force)
         print(json.dumps(store.get("status", {}), indent=2))
+        if store.get("ka_searches"):
+            print(json.dumps(store.get("ka_status", {}), indent=2))
         return
     worker.status(scanning=False)
     server = ThreadingHTTPServer(("0.0.0.0" if os.getenv("VITOOL_CONTAINER") == "1" else "127.0.0.1", args.port), handler_for(store, worker))
