@@ -624,7 +624,7 @@ KA_HTML = """<ul>
 <li><article data-adid="3529076916" data-href="/s-anzeige/iphone-14-128gb-schwarz/3529076916-173-3376?x=1">
 <script type="application/ld+json">{"title":"iPhone 14 - 128GB - Schwarz","description":"Batterie 81%","contentUrl":"https://img.kleinanzeigen.de/b.jpg"}</script>
 <div><span>10963 Kreuzberg</span><span>(2 km)</span></div><div><span>Heute, 16:48</span></div>
-<h3><a>iPhone 14 - 128GB - Schwarz</a></h3><p>iPhone 14 - 128GB ...</p><p>1.200 € VB</p></article></li>
+<h3><a>iPhone 14 - 128GB - Schwarz</a></h3><p>iPhone 14 - 128GB, Neupreis 900 € ...</p><div><p>1.200 € VB</p><p>1.390 €</p></div></article></li>
 <li><article data-adid="3529075629" data-href="/s-anzeige/karton/3529075629-406-9642">
 <h3><a>Umzugskartons</a></h3><p>Zu verschenken</p></article></li>
 </ul>"""

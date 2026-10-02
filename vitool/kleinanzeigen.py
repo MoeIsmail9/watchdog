@@ -17,6 +17,7 @@ from .source import SourceError, retry_seconds
 BASE = "https://www.kleinanzeigen.de"
 RADII = (0, 5, 10, 20, 30, 50, 100, 150, 200)
 MAX_SEARCHES = 5
+PRICE_PATTERN = re.compile(r"\d[\d.]*(?:,\d{1,2})?\s*€(?:\s*VB)?|VB|Zu verschenken")
 
 
 def slug(text):
@@ -105,8 +106,10 @@ def parse_results(html):
         spans = [span.get_text(" ", strip=True) for span in article.find_all("span")]
         location = next((text for text in spans if re.match(r"^\d{5}\b", text)), "")
         distance = next((text.strip("()") for text in spans if re.fullmatch(r"\(\s*\d+\s*km\s*\)", text)), "")
-        price_text = next((p.get_text(" ", strip=True) for p in article.find_all("p")
-                           if "€" in p.get_text() or p.get_text(strip=True) in ("VB", "Zu verschenken")), "")
+        # The description snippet is also a <p> and may mention prices ("Neupreis 900 €"),
+        # so only a paragraph that is nothing but a price counts.
+        price_text = next((text for text in (p.get_text(" ", strip=True) for p in article.find_all("p"))
+                           if PRICE_PATTERN.fullmatch(text)), "")
         items.append({"id": "ka:" + ad_id, "ad_id": int(ad_id), "title": title,
                       "description": data.get("description", ""), "price": parse_price(price_text),
                       "price_text": price_text, "location": location, "distance": distance,
