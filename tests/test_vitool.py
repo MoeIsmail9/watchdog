@@ -787,3 +787,50 @@ def test_ka_dashboard_add_and_delete(store, monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_turso_connection_is_reused_and_replaced_after_failure(tmp_path, monkeypatch):
+    import sqlite3
+    import sys
+    import types
+
+    opened = []
+
+    class Flaky:
+        def __init__(self):
+            self.db = sqlite3.connect(tmp_path / "remote.sqlite3")
+            self.fail = False
+
+        def __enter__(self):
+            return self.db.__enter__()
+
+        def __exit__(self, *exc):
+            return self.db.__exit__(*exc)
+
+        def execute(self, *args):
+            if self.fail:
+                raise ValueError("Hrana: connection refused")
+            return self.db.execute(*args)
+
+        def executescript(self, script):
+            return self.db.executescript(script)
+
+        def close(self):
+            self.db.close()
+
+    def connect(url, auth_token):
+        opened.append(Flaky())
+        return opened[-1]
+
+    monkeypatch.setitem(sys.modules, "libsql", types.SimpleNamespace(connect=connect))
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://example.turso.io")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "token")
+    remote = Store(tmp_path / "data")
+    for n in range(20):
+        remote.set("count", n)
+        assert remote.get("count") == n
+    assert len(opened) == 1
+    opened[0].fail = True
+    with pytest.raises(ValueError):
+        remote.get("count")
+    assert remote.get("count") == 19 and len(opened) == 2

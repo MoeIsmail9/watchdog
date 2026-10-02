@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from contextlib import contextmanager
@@ -17,6 +18,10 @@ class Store:
         self.auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
         if bool(self.database_url) != bool(self.auth_token):
             raise ValueError("Set both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN")
+        # One shared Turso connection. A new connection per query made a single scan
+        # open hundreds of connections, and Turso started refusing them.
+        self.remote = None
+        self.remote_lock = threading.RLock()
         with self.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -32,10 +37,23 @@ class Store:
     @contextmanager
     def connect(self):
         if self.database_url:
-            import libsql
-            db = libsql.connect(self.database_url, auth_token=self.auth_token)
-        else:
-            db = sqlite3.connect(self.path, timeout=10)
+            with self.remote_lock:
+                if self.remote is None:
+                    import libsql
+                    self.remote = libsql.connect(self.database_url, auth_token=self.auth_token)
+                try:
+                    with self.remote:
+                        yield self.remote
+                except Exception:
+                    # Drop a broken connection so the next query reconnects.
+                    remote, self.remote = self.remote, None
+                    try:
+                        remote.close()
+                    except Exception:
+                        pass
+                    raise
+            return
+        db = sqlite3.connect(self.path, timeout=10)
         try:
             with db:
                 yield db

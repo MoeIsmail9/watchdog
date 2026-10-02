@@ -7,6 +7,10 @@ services:
     ports:
       - "127.0.0.1:8765:8765"
     env_file: .env
+    environment:
+      # Dashboard only: the cloud (GitHub Actions) does the scheduled scans.
+      # "Check now" still scans once from this machine.
+      VITOOL_WEB_ONLY: "1"
     security_opt:
       - no-new-privileges:true
     cap_drop:
