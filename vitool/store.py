@@ -73,6 +73,15 @@ class Store:
             row = db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
         return json.loads(row[0]) if row else default
 
+    def get_many(self, defaults):
+        """Read several state keys in one query; missing keys get their default."""
+        keys = list(defaults)
+        with self.connect() as db:
+            rows = db.execute(f"SELECT key, value FROM state WHERE key IN ({','.join('?' * len(keys))})",
+                              tuple(keys)).fetchall()
+        found = {key: json.loads(value) for key, value in rows}
+        return {key: found.get(key, default) for key, default in defaults.items()}
+
     def set(self, key, value):
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO state VALUES (?,?)", (key, json.dumps(value)))

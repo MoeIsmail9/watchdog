@@ -9,7 +9,7 @@ from base64 import b64decode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .settings import BRANDS, COLORS, CONDITIONS, MATERIALS
+from .settings import BRANDS, COLORS, CONDITIONS, DEFAULTS, MATERIALS, validate
 from .matching import match_item
 from . import kleinanzeigen
 from .source import search_url
@@ -83,9 +83,12 @@ def handler_for(store, worker):
             if self.path == "/":
                 return self.response(200, (Path(__file__).parent / "static/index.html").read_bytes(), "text/html; charset=utf-8")
             if self.path == "/api/state":
-                settings = store.settings()
-                return self.response(200, {"settings": settings, "status": store.get("status", {}),
-                    "next_scan": store.get("next_scan", 0), "blocked": store.get("blocked", False),
+                # One round trip for all state keys: each Turso query can take ~0.5 s from home.
+                state = store.get_many({"settings": DEFAULTS, "status": {}, "next_scan": 0, "blocked": False,
+                                        "ka_searches": [], "ka_status": {}, "ka_next_scan": 0})
+                settings = validate(state["settings"])
+                return self.response(200, {"settings": settings, "status": state["status"],
+                    "next_scan": state["next_scan"], "blocked": state["blocked"],
                     "schedule": {"mode": "github", "minimum_seconds": 900}
                                 if os.getenv("VITOOL_WEB_ONLY") == "1"
                                 else {"mode": "continuous", "minimum_seconds": 10},
@@ -93,9 +96,9 @@ def handler_for(store, worker):
                     "matches": [i for i in store.matches()
                                 if i.get("source") == "kleinanzeigen" or match_item(i, settings)[0]],
                     "ka_searches": [{**search, "url": kleinanzeigen.search_url(search)}
-                                    for search in store.get("ka_searches", [])],
-                    "ka_status": store.get("ka_status", {}),
-                    "ka_next_scan": store.get("ka_next_scan", 0),
+                                    for search in state["ka_searches"]],
+                    "ka_status": state["ka_status"],
+                    "ka_next_scan": state["ka_next_scan"],
                     "options": {"brands": sorted(BRANDS, key=str.casefold), "colors": list(COLORS),
                                 "conditions": sorted(CONDITIONS), "materials": sorted(MATERIALS),
                                 "departments": ["men", "women"],

@@ -834,3 +834,10 @@ def test_turso_connection_is_reused_and_replaced_after_failure(tmp_path, monkeyp
     with pytest.raises(ValueError):
         remote.get("count")
     assert remote.get("count") == 19 and len(opened) == 2
+
+
+def test_get_many_reads_state_in_one_call(store):
+    store.set("status", {"message": "ok"})
+    store.set("ka_searches", [{"id": "a"}])
+    assert store.get_many({"status": {}, "ka_searches": [], "missing": 7}) == {
+        "status": {"message": "ok"}, "ka_searches": [{"id": "a"}], "missing": 7}
