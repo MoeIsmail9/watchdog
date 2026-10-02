@@ -95,6 +95,7 @@ def handler_for(store, worker):
                     "ka_searches": [{**search, "url": kleinanzeigen.search_url(search)}
                                     for search in store.get("ka_searches", [])],
                     "ka_status": store.get("ka_status", {}),
+                    "ka_next_scan": store.get("ka_next_scan", 0),
                     "options": {"brands": sorted(BRANDS, key=str.casefold), "colors": list(COLORS),
                                 "conditions": sorted(CONDITIONS), "materials": sorted(MATERIALS),
                                 "departments": ["men", "women"],
